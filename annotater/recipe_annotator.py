@@ -5,8 +5,19 @@ from logging import logger
 _MAX_RETRIES_BEFORE_MANUAL_ANNOTATION = 3
 
 class RecipeAnnotator:
-    def __init__(self, annotation_model: RecipeAnnotationModel):
-        self._annotation_model = annotation_model
+    def __init__(
+        self,
+        recipe_annotation_pipeline: Pipeline,
+        ingredient_extraction_model: IngredientExtractionModel,
+        instruction_extraction_model: InstructionExtractionModel,
+        recipe_categorization_model: RecipeCategorizationModel,
+        recipe_effort_estimate_model: RecipeEffortEstimateModel
+    ):
+        self._recipe_annotation_pipeline = recipe_annotation_pipeline
+        self._ingredient_extraction_model = ingredient_extraction_model
+        self._instruction_extraction_model = instruction_extraction_model
+        self._recipe_categorization_model = recipe_categorization_model
+        self._recipe_effort_estimate_model = recipe_effort_estimate_model
 
     def __call__(self, recipe_text: str) -> RecipeAnnotation:
         return self._user_validation_loop(recipe_text)
@@ -23,7 +34,18 @@ class RecipeAnnotator:
         return recipe_annotation
 
     def _annotate_recipe(self, recipe_text: str) -> RecipeAnnotation:
-        return self._annotation_model(recipe_text)
+        ingredients = self._ingredient_extraction_model(recipe_text)
+        instructions = self._instruction_extraction_model(recipe_text)
+        diet, diet_tags = self._recipe_categorization_model(recipe_text)
+        effort = self._recipe_effort_estimate_model(recipe_text)
+        # return RecipeAnnotation(
+        #     ingredients=ingredients,
+        #     instructions=instructions,
+        #     diet=diet,
+        #     diet_tags=diet_tags,
+        #     effort=effort
+        # )
+        return self._recipe_annotation_pipeline(recipe_text)
 
     def _user_validation(self, annotation: RecipeAnnotation) -> bool:
         pass

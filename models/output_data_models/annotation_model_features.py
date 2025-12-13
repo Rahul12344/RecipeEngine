@@ -1,10 +1,25 @@
 from dataclasses import dataclass
 from enum import Enum
 
-class Vegetarian(Enum):
+class Diet(Enum):
     VEGETARIAN = "vegetarian"
     NON_VEGETARIAN = "non-vegetarian"
+    PESCATARIAN = "pescatarian"
     VEGAN = "vegan"
+
+class DietTag(Enum):
+    KETO = "keto"
+    GLUTEN_FREE = "gluten-free"
+    LACTOSE_FREE = "lactose-free"
+    PALEO = "paleo"
+    MEDITERRANEAN = "mediterranean"
+    HALAL = "halal"
+    KOSHER = "kosher"
+    NUT_FREE = "nut-free"
+    SEAFOOD_FREE = "seafood-free"
+    SOY_FREE = "soy-free"
+    WHEAT_FREE = "wheat-free"
+    PEANUT_FREE = "peanut-free"
 
 
 @dataclass(frozen=True)
@@ -12,6 +27,7 @@ class RecipeIngredient:
     name: str
     quantity: float
     unit: str
+    process: str | None = None
 
 @dataclass(frozen=True)
 class RecipeInstruction:
@@ -33,9 +49,10 @@ class Effort:
 
 @dataclass(frozen=True)
 class RecipeMetadata:
-    vegetarian: Vegetarian
+    diet: Diet
     group: str
     effort: Effort
+    diet_tags: list[DietTag]
 
 @dataclass(frozen=True)
 class RecipeAnnotation:
