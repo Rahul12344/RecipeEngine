@@ -8,7 +8,7 @@ class RecipeAnnotationPipeline:
         self._annotator = annotator
         self._recipe_annotation_store = recipe_annotion_store
 
-    def __call__(self, recipe_text: list[str]) -> None:
+    def __call__(self, recipe_text: str) -> None:
         annotation =self._annotator(recipe_text)
         recipe_id = self._generate_recipe_id(recipe_text)
         self._recipe_annotation_store.store(recipe_id, annotation)

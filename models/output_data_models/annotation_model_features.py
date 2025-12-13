@@ -43,9 +43,22 @@ class Recipe:
 
 @dataclass(frozen=True)
 class Effort:
-    time: str
+    cook_time: str
+    prep_time: str
     difficulty: str
     cost: str
+
+@dataclass(frozen=True)
+class Nutrition:
+    calories: int
+    protein: int
+    carbs: int
+    fat: int
+    saturated_fat: int
+    cholesterol: int
+    sodium: int
+    fiber: int
+    sugar: int
 
 @dataclass(frozen=True)
 class RecipeMetadata:
