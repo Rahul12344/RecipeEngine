@@ -3,6 +3,7 @@
 RecipeEngine is a comprehensive recipe management and recommendation platform that helps users discover, organize, and manage recipes based on their available ingredients and preferences. It supports text-based and image-based lookups of recipes.
 
 ## Features
+Development in-progress
 
 ### 1. Recipe Hub
 - Automated batch retrieval of recipes from various sources
@@ -33,7 +34,7 @@ RecipeEngine is a comprehensive recipe management and recommendation platform th
 - **Backend**: Python with FastAPI/Flask
 - **Frontend**: React/Next.js
 - **Database**: TBD
-- **Machine Learning**: TensorFlow/PyTorch for recommendation and image recognition
+- **Machine Learning**: PyTorch for recommendation and image recognition
 - **APIs**: Integration with various recipe and ingredient APIs
 - **Web Scraping**: TBD
 
