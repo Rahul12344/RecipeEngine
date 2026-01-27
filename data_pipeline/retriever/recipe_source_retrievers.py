@@ -33,7 +33,7 @@ class RawRecipeData:
 
 class BaseRetriever:
     """
-    Retrieves raw HTML from allrecipes.com.
+    Retrieves raw HTML.
     Only handles retrieval - extraction logic is handled by transformers.
     """
 
@@ -68,7 +68,6 @@ class BaseRetriever:
                     break
                 try:
                     data = await asyncio.wait_for(output_queue.get(), timeout=1.0)
-                    print(f"Retrieved recipe: {data.url}")
                     yield data
                     output_queue.task_done()
                 except asyncio.TimeoutError:
@@ -135,17 +134,3 @@ class BaseRetriever:
 
     def _is_recipe_page(self, url: str, source_metadata: SourceMetadata) -> bool:
         return source_metadata.recipe_identifier in url
-
-async def main():
-    retriever = BaseRetriever(max_concurrent=20, delay_range=(0.0, 0.01))
-
-    # Create your SourceMetadata object
-
-
-    # Use async for to iterate over the async generator
-    async for recipe_data in retriever.scrape(FoodDotComSourceMetadata()):
-        print(recipe_data.url)
-        # You can also process recipe_data.html here
-
-if __name__ == "__main__":
-    asyncio.run(main())
