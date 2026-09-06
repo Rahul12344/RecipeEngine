@@ -25,7 +25,7 @@ from models.output_data_models.annotation_model_features import (
     RecipeInstruction,
 )
 from store.postgres.recipe_backing_store import build_recipe_backing_store
-from store.recipe_store import RecipeStore, recipe_id_for_url
+from store.recipe_store import RecipeStore, StoredRecipe, recipe_id_for_url
 from store.tests.fake_asyncpg import FakeAsyncpgPool
 
 
@@ -243,13 +243,20 @@ class LivePostgresRecipeStoreTest(unittest.IsolatedAsyncioTestCase):
             table_name="recipes_test_fixture",
             key_column="id",
             extra_columns=(
-                IndexedColumn("source"),
-                IndexedColumn("url", unique=True),
-                IndexedColumn("name"),
-                IndexedColumn("ingested_at", sql_type="TIMESTAMPTZ"),
+                IndexedColumn("source", extract=lambda stored: stored.source),
+                IndexedColumn("url", extract=lambda stored: stored.url, unique=True),
+                IndexedColumn("name", extract=lambda stored: stored.name),
+                IndexedColumn("ingested_at", extract=lambda stored: stored.ingested_at, sql_type="TIMESTAMPTZ"),
             ),
-            serialize=Recipe.to_dict,
-            deserialize=Recipe.from_dict,
+            serialize=lambda stored: stored.recipe.to_dict(),
+            deserialize=lambda row: StoredRecipe(
+                id=row["id"],
+                source=row["source"],
+                url=row["url"],
+                name=row["name"],
+                ingested_at=row["ingested_at"],
+                recipe=Recipe.from_dict(row["data"]),
+            ),
         )
         self.store = RecipeStore(recipe_backing_store=self.backing_store)
         pool = await self.backing_store._ensure_connection()

@@ -3,9 +3,9 @@ Persistence for parsed `Recipe` objects.
 
 This class has no Postgres-specific code at all: it's injected (via DI, see
 store/postgres/recipe_backing_store.py) with a generic, already-configured
-backing store and only translates between Recipe-shaped method calls
-(save_recipe/get_recipe/get_by_url/list_recipes) and that backing store's
-generic (upsert/get_row/get_row_by_column/list_rows) API.
+backing store and just assembles/reads StoredRecipe values through its
+generic (upsert/get/get_by_column/list) API -- both sides deal in
+StoredRecipe directly, no separate "row" shape involved.
 
 Query patterns for recipes beyond "by id/url/source" aren't known yet, so
 the full nested Recipe (ingredients + instructions) lives in a single JSONB
@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Optional
 
-from async_store.indexed_postgres_store import IndexedPostgresStore, Row
+from async_store.indexed_postgres_store import IndexedPostgresStore
 from di import provides
 from models.output_data_models.annotation_model_features import Recipe
 
@@ -64,24 +64,24 @@ class RecipeStore:
         creating a duplicate). Returns the recipe id.
         """
         recipe_id = recipe_id_for_url(url)
-        await self._backing_store.upsert(
-            recipe_id,
-            recipe,
+        stored = StoredRecipe(
+            id=recipe_id,
             source=source,
             url=url,
             name=recipe.name,
             ingested_at=datetime.now(timezone.utc),
+            recipe=recipe,
         )
+        await self._backing_store.upsert(recipe_id, stored)
         return recipe_id
 
     async def get_recipe(self, recipe_id: str) -> Optional[StoredRecipe]:
         """Fetch a stored recipe by id."""
-        row = await self._backing_store.get_row(recipe_id)
-        return self._row_to_stored_recipe(row) if row is not None else None
+        return await self._backing_store.get(recipe_id)
 
     async def get_by_url(self, url: str) -> Optional[StoredRecipe]:
         """Fetch a stored recipe by its original source URL."""
-        return await self.get_recipe(recipe_id_for_url(url))
+        return await self._backing_store.get_by_column("url", url)
 
     async def list_recipes(
         self,
@@ -90,24 +90,13 @@ class RecipeStore:
         offset: int = 0,
     ) -> list[StoredRecipe]:
         """List stored recipes, optionally filtered by source, newest-ingested first."""
-        rows = await self._backing_store.list_rows(
+        return await self._backing_store.list(
             filters={"source": source} if source is not None else None,
             order_by="ingested_at",
             descending=True,
             limit=limit,
             offset=offset,
         )
-        return [self._row_to_stored_recipe(row) for row in rows]
 
     async def close(self) -> None:
         await self._backing_store.close()
-
-    def _row_to_stored_recipe(self, row: Row) -> StoredRecipe:
-        return StoredRecipe(
-            id=row.key,
-            source=row.extra["source"],
-            url=row.extra["url"],
-            name=row.extra["name"],
-            ingested_at=row.extra["ingested_at"],
-            recipe=row.value,
-        )

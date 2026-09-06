@@ -3,10 +3,11 @@ DI provider for the Postgres-backed store behind
 store.recipe_annotation_store.RecipeAnnotationStore.
 
 Builds a fully-configured IndexedPostgresStore for the `recipe_annotations`
-table: the table name, extra indexable columns (sort_key), and the
-RecipeAnnotation <-> JSON mapping (delegated to
-RecipeAnnotation.to_dict/from_dict) all live here, kept separate from
-RecipeAnnotationStore itself, which has no Postgres-specific code at all.
+table: the table name, the `sort_key` extra column (derived from the
+annotated recipe's name), and the RecipeAnnotation <-> JSON mapping
+(delegated to RecipeAnnotation.to_dict/from_dict) all live here, kept
+separate from RecipeAnnotationStore itself, which has no Postgres-specific
+code at all.
 """
 from __future__ import annotations
 
@@ -20,7 +21,9 @@ def build_recipe_annotation_backing_store() -> IndexedPostgresStore[RecipeAnnota
     return IndexedPostgresStore(
         table_name="recipe_annotations",
         key_column="recipe_id",
-        extra_columns=(IndexedColumn("sort_key"),),
+        extra_columns=(
+            IndexedColumn("sort_key", extract=lambda annotation: annotation.recipe.name),
+        ),
         serialize=RecipeAnnotation.to_dict,
-        deserialize=RecipeAnnotation.from_dict,
+        deserialize=lambda row: RecipeAnnotation.from_dict(row["data"]),
     )
