@@ -24,8 +24,9 @@ from models.output_data_models.annotation_model_features import (
     RecipeIngredient,
     RecipeInstruction,
 )
+from models.output_data_models.stored_recipe import StoredRecipe
 from store.postgres.recipe_backing_store import build_recipe_backing_store
-from store.recipe_store import RecipeStore, StoredRecipe, recipe_id_for_url
+from store.recipe_store import RecipeStore, recipe_id_for_url
 from store.tests.fake_asyncpg import FakeAsyncpgPool
 
 

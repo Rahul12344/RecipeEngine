@@ -3,9 +3,12 @@ Persistence for parsed `Recipe` objects.
 
 This class has no Postgres-specific code at all: it's injected (via DI, see
 store/postgres/recipe_backing_store.py) with a generic, already-configured
-backing store and just assembles/reads StoredRecipe values through its
-generic (upsert/get/get_by_column/list) API -- both sides deal in
-StoredRecipe directly, no separate "row" shape involved.
+backing store and just assembles/reads StoredRecipe values (defined in
+models/output_data_models/stored_recipe.py, not here -- so this file and
+store/postgres/recipe_backing_store.py both depend on that shared location
+instead of on each other) through its generic (upsert/get/get_by_column/list)
+API -- both sides deal in StoredRecipe directly, no separate "row" shape
+involved.
 
 Query patterns for recipes beyond "by id/url/source" aren't known yet, so
 the full nested Recipe (ingredients + instructions) lives in a single JSONB
@@ -17,13 +20,13 @@ an opaque blob (would make even "recipes from source X" require a full scan).
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Optional
 
 from async_store.indexed_postgres_store import IndexedPostgresStore
 from di import provides
 from models.output_data_models.annotation_model_features import Recipe
+from models.output_data_models.stored_recipe import StoredRecipe
 
 
 def recipe_id_for_url(url: str) -> str:
@@ -36,18 +39,6 @@ def recipe_id_for_url(url: str) -> str:
     since the URL is stable across re-scrapes while raw HTML/text is not.
     """
     return hashlib.sha256(url.encode()).hexdigest()
-
-
-@dataclass(frozen=True)
-class StoredRecipe:
-    """A persisted Recipe plus the indexable metadata columns stored alongside it."""
-
-    id: str
-    source: str
-    url: str
-    name: str
-    ingested_at: datetime
-    recipe: Recipe
 
 
 @provides("recipe_store")

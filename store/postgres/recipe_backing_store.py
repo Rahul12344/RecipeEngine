@@ -12,7 +12,7 @@ from __future__ import annotations
 from async_store.indexed_postgres_store import IndexedColumn, IndexedPostgresStore
 from di import provides
 from models.output_data_models.annotation_model_features import Recipe
-from store.recipe_store import StoredRecipe
+from models.output_data_models.stored_recipe import StoredRecipe
 
 
 def _stored_recipe_from_row(row: dict) -> StoredRecipe:
