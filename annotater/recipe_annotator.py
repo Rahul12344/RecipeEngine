@@ -1,19 +1,27 @@
-from models.annotation_model_features import RecipeAnnotation
+from __future__ import annotations
+
+import logging
+
+from di import provides
+from models.output_data_models.annotation_model_features import RecipeAnnotation
 from models.annotation_model import RecipeAnnotationModel
-from logging import logger
+
+logger = logging.getLogger(__name__)
 
 _MAX_RETRIES_BEFORE_MANUAL_ANNOTATION = 3
 
+
+@provides("recipe_annotator")
 class RecipeAnnotator:
     def __init__(
         self,
-        recipe_annotation_pipeline: Pipeline,
+        extraction_pipeline: Pipeline,
         ingredient_extraction_model: IngredientExtractionModel,
         instruction_extraction_model: InstructionExtractionModel,
         recipe_categorization_model: RecipeCategorizationModel,
         recipe_effort_estimate_model: RecipeEffortEstimateModel
     ):
-        self._recipe_annotation_pipeline = recipe_annotation_pipeline
+        self._recipe_annotation_pipeline = extraction_pipeline
         self._ingredient_extraction_model = ingredient_extraction_model
         self._instruction_extraction_model = instruction_extraction_model
         self._recipe_categorization_model = recipe_categorization_model

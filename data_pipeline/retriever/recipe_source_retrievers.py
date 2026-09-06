@@ -9,7 +9,8 @@ import asyncio
 import aiohttp
 from concurrent.futures import ThreadPoolExecutor
 from bs4 import BeautifulSoup
-from data_pipeline.meta_info.source_metadata import AllRecipesSourceMetadata, SourceMetadata, FoodDotComSourceMetadata
+from di import provides
+from data_pipeline.meta_info.source_metadata import SourceMetadata
 
 # TODO: Rethink logging
 logging.basicConfig(
@@ -31,6 +32,7 @@ class RawRecipeData:
     url: str
 
 
+@provides("recipe_source_retriever")
 class BaseRetriever:
     """
     Retrieves raw HTML.

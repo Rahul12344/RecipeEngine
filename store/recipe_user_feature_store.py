@@ -1,3 +1,7 @@
+from di import provides
+
+
+@provides("recipe_user_feature_store")
 class RecipeUserFeatureStore:
     def __init__(self):
         pass

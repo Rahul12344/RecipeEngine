@@ -1,9 +1,14 @@
+from __future__ import annotations
+
 import asyncio
 import aioboto3
 
+from di import provides
 from data_pipeline.retriever.recipe_source_retrievers import BaseRetriever
-from data_pipeline.meta_info.source_metadata import AllRecipesSourceMetadata, SourceMetadata
+from data_pipeline.meta_info.source_metadata import SourceMetadata
 
+
+@provides("ingester")
 class Ingester:
     def __init__(self, recipe_source_retriever: BaseRetriever, supported_sources: list[SourceMetadata]):
         self._recipe_source_retriever = recipe_source_retriever

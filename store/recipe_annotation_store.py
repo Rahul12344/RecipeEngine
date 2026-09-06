@@ -1,5 +1,8 @@
-from models.annotation_model_features import RecipeAnnotation
+from di import provides
+from models.output_data_models.annotation_model_features import RecipeAnnotation
 
+
+@provides("recipe_annotation_store")
 class RecipeAnnotationStore:
     def store(self, recipe_id: str, annotation: RecipeAnnotation) -> None:
         pass

@@ -1,9 +1,15 @@
+from __future__ import annotations
+
 from enum import Enum
+
+from di import provides
 from annotater.recipe_annotation_pipeline import RecipeAnnotationPipeline
 
 class Source(Enum):
     SOURCE_ALL_RECIPES = "all_recipes"
 
+
+@provides("recipe_retriever")
 class RecipeRetriever:
     def __init__(self, recipe_annotation_pipeline: RecipeAnnotationPipeline, recipe_source_retrievers: dict[Source, RecipeSourceRetriever]):
         self._recipe_annotation_pipeline = recipe_annotation_pipeline
