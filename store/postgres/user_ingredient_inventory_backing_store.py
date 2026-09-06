@@ -4,26 +4,36 @@ store.user_ingredient_inventory_store.UserIngredientInventoryStore.
 
 Builds a fully-configured IndexedPostgresStore for the
 `user_ingredient_inventory` table: each user's inventory is a JSONB list of
-already-plain ingredient-item dicts, keyed by user_id, no extra indexed
-columns needed. UserIngredientInventoryStore itself does the
-InventoryItem <-> dict conversion (via InventoryItem.to_dict/from_dict), so
-this backing store just passes plain, already-JSON-able lists straight
-through -- no custom serialize/deserialize needed here.
+ingredient-item dicts, keyed by user_id, no extra indexed columns needed.
+Both sides deal in UserIngredientInventory directly (upsert/get), so this
+provider owns the UserIngredientInventory <-> row mapping too, kept
+separate from UserIngredientInventoryStore itself, which has no
+Postgres-specific code at all.
 """
 from __future__ import annotations
 
 from async_store.indexed_postgres_store import IndexedPostgresStore
 from di import provides
+from models.features.user_ingredient_inventory import InventoryItem, UserIngredientInventory
 
 DEFAULT_TABLE_NAME = "user_ingredient_inventory"
 DEFAULT_KEY_COLUMN = "user_id"
 DEFAULT_VALUE_COLUMN = "items"
 
 
+def _inventory_from_row(row: dict) -> UserIngredientInventory:
+    return UserIngredientInventory(
+        user_id=row[DEFAULT_KEY_COLUMN],
+        items=[InventoryItem.from_dict(item) for item in row[DEFAULT_VALUE_COLUMN]],
+    )
+
+
 @provides("user_ingredient_inventory_backing_store")
-def build_user_ingredient_inventory_backing_store() -> IndexedPostgresStore[list]:
+def build_user_ingredient_inventory_backing_store() -> IndexedPostgresStore[UserIngredientInventory]:
     return IndexedPostgresStore(
         table_name=DEFAULT_TABLE_NAME,
         key_column=DEFAULT_KEY_COLUMN,
         value_column=DEFAULT_VALUE_COLUMN,
+        serialize=lambda inventory: [item.to_dict() for item in inventory.items],
+        deserialize=_inventory_from_row,
     )

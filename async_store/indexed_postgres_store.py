@@ -1,15 +1,26 @@
 """
 Shared plumbing for a Postgres-backed store of values of type T, identified
 by a string key, with a handful of extra, independently-queryable columns
-alongside a JSONB blob holding the value's full serialized structure.
+alongside a JSONB blob holding T's serialized structure.
+
+Both reads and writes deal in T directly: `upsert(key, value: T)` and
+`get(key) -> Optional[T]` (no separate "row" shape in the public API). How T
+maps onto the table's columns is entirely a per-implementation concern,
+supplied at construction time:
+  - `extra_columns`: IndexedColumn(name, extract, ...) entries -- `extract`
+    pulls that column's value off a T instance, for writes.
+  - `serialize(value: T)`: the JSON-able blob for the value column.
+  - `deserialize(row)`: given the *whole* row as a plain dict (every column,
+    with the value column already json.loads'd), reconstructs T -- so a
+    store whose T needs data from an extra column, not just the blob
+    (e.g. StoredRecipe needing `source`/`url`/`ingested_at`), can use it.
 
 This is meant to be used directly (via composition), not subclassed: a
 @provides-registered *function* builds a fully-configured instance (table
 name, extra columns, serialize/deserialize) for a given entity type, and a
 plain, backend-agnostic domain class (e.g. RecipeStore) is injected with
-that instance and calls only its generic, non-SQL methods
-(get/set/upsert/get_by_column/get_row/list_rows) -- no SQL, table names, or
-JSONB casting ever appear in a domain class.
+that instance and calls only its generic, non-SQL methods -- no SQL, table
+names, or JSONB casting ever appear in a domain class.
 """
 from __future__ import annotations
 
@@ -27,19 +38,17 @@ DATABASE_URL_ENV_VAR = "RECIPE_ENGINE_DATABASE_URL"
 
 
 class IndexedColumn(NamedTuple):
-    """One extra column, alongside the key and JSONB value, that rows can be looked up by."""
+    """One extra column, alongside the key and JSONB value, that rows can be
+    looked up by -- and how to read its value off a T instance for writes."""
 
     name: str
+    extract: Callable[[Any], Any]
     sql_type: str = "TEXT"
     unique: bool = False
 
 
-class Row(NamedTuple):
-    """One stored record: its key, its extra column values by name, and its deserialized value."""
-
-    key: str
-    extra: Dict[str, Any]
-    value: Any
+def _identity(value: Any) -> Any:
+    return value
 
 
 class IndexedPostgresStore(AsyncPostgresStore[str, T], Generic[T]):
@@ -47,9 +56,9 @@ class IndexedPostgresStore(AsyncPostgresStore[str, T], Generic[T]):
     A Postgres table shaped like:
         <key_column> TEXT PRIMARY KEY, <extra_columns...>, <value_column> JSONB NOT NULL
 
-    `serialize`/`deserialize` convert a value of type T to/from a JSON-able
-    dict; if omitted, values are assumed to already be JSON-able as-is
-    (matching AsyncPostgresStore's own default behavior).
+    Overrides AsyncPostgresStore's get/set entirely (rather than its
+    _serialize_value/_deserialize_value hooks) since those assume a single
+    value column; get/set here span every declared column instead.
     """
 
     def __init__(
@@ -59,8 +68,8 @@ class IndexedPostgresStore(AsyncPostgresStore[str, T], Generic[T]):
         key_column: str = "id",
         value_column: str = "data",
         extra_columns: Sequence[IndexedColumn] = (),
-        serialize: Optional[Callable[[T], Any]] = None,
-        deserialize: Optional[Callable[[Any], T]] = None,
+        serialize: Callable[[T], Any] = _identity,
+        deserialize: Callable[[Dict[str, Any]], T] = _identity,
     ):
         super().__init__(
             connection_string=connection_string or os.environ.get(DATABASE_URL_ENV_VAR),
@@ -72,13 +81,6 @@ class IndexedPostgresStore(AsyncPostgresStore[str, T], Generic[T]):
         self.extra_columns = extra_columns
         self._serialize = serialize
         self._deserialize = deserialize
-
-    def _serialize_value(self, value: T) -> str:
-        return json.dumps(self._serialize(value) if self._serialize else value)
-
-    def _deserialize_value(self, json_str) -> T:
-        data = json.loads(json_str) if isinstance(json_str, str) else json_str
-        return self._deserialize(data) if self._deserialize else data
 
     async def _ensure_connection(self):
         if not self.connection_string:
@@ -120,22 +122,23 @@ class IndexedPostgresStore(AsyncPostgresStore[str, T], Generic[T]):
         async with pool.acquire() as conn:
             return await conn.fetch(query, *args)
 
-    def _row_to_generic(self, row) -> Row:
-        extra = {col.name: row[col.name] for col in self.extra_columns}
-        return Row(key=row[self.key_column], extra=extra, value=self._deserialize_value(row[self.value_column]))
+    def _all_column_names(self) -> List[str]:
+        return [self.key_column, *(col.name for col in self.extra_columns), self.value_column]
 
-    async def upsert(self, key: str, value: T, **extra_values: Any) -> None:
-        """
-        Insert a row (key + extra_columns' values + serialized value), or
-        update all of those columns if `key` already exists.
+    def _row_to_value(self, row) -> T:
+        plain = {name: row[name] for name in self._all_column_names()}
+        raw_blob = plain[self.value_column]
+        plain[self.value_column] = json.loads(raw_blob) if isinstance(raw_blob, str) else raw_blob
+        return self._deserialize(plain)
 
-        `extra_values` must have exactly one keyword per declared
-        `extra_columns` entry, by name.
-        """
-        data = self._serialize_value(value)
+    async def upsert(self, key: str, value: T) -> None:
+        """Insert `value` under `key` (deriving each extra column's value from it), or
+        update every column if `key` already exists."""
+        data = json.dumps(self._serialize(value))
         extra_names = [col.name for col in self.extra_columns]
+        extra_values = [col.extract(value) for col in self.extra_columns]
         columns = [self.key_column, *extra_names, self.value_column]
-        values = [key, *(extra_values[name] for name in extra_names), data]
+        values = [key, *extra_values, data]
         placeholders = [f"${i}" for i in range(1, len(values))] + [f"${len(values)}::jsonb"]
         update_clause = ", ".join(f"{name} = EXCLUDED.{name}" for name in (*extra_names, self.value_column))
 
@@ -148,43 +151,32 @@ class IndexedPostgresStore(AsyncPostgresStore[str, T], Generic[T]):
             *values,
         )
 
-    async def get_by_column(self, column: str, value: Any) -> Optional[T]:
-        """Fetch and deserialize the first row where `column` equals `value`."""
+    async def get(self, key: str) -> Optional[T]:
+        """Fetch and deserialize the value stored under `key`."""
         row = await self._fetchrow(
-            f"SELECT {self.value_column} FROM {self.table_name} WHERE {column} = $1 LIMIT 1",
-            value,
-        )
-        return self._deserialize_value(row[self.value_column]) if row is not None else None
-
-    async def get_row(self, key: str) -> Optional[Row]:
-        """Fetch a row (extra column values + deserialized value) by its key."""
-        columns = self._all_column_names()
-        row = await self._fetchrow(
-            f"SELECT {', '.join(columns)} FROM {self.table_name} WHERE {self.key_column} = $1",
+            f"SELECT {', '.join(self._all_column_names())} FROM {self.table_name} WHERE {self.key_column} = $1",
             key,
         )
-        return self._row_to_generic(row) if row is not None else None
+        return self._row_to_value(row) if row is not None else None
 
-    async def get_row_by_column(self, column: str, value: Any) -> Optional[Row]:
-        """Fetch a row (extra column values + deserialized value) by any one column's value."""
-        columns = self._all_column_names()
+    async def get_by_column(self, column: str, value: Any) -> Optional[T]:
+        """Fetch and deserialize the first value where `column` equals `value`."""
         row = await self._fetchrow(
-            f"SELECT {', '.join(columns)} FROM {self.table_name} WHERE {column} = $1 LIMIT 1",
+            f"SELECT {', '.join(self._all_column_names())} FROM {self.table_name} WHERE {column} = $1 LIMIT 1",
             value,
         )
-        return self._row_to_generic(row) if row is not None else None
+        return self._row_to_value(row) if row is not None else None
 
-    async def list_rows(
+    async def list(
         self,
         filters: Optional[Dict[str, Any]] = None,
         order_by: Optional[str] = None,
         descending: bool = False,
         limit: int = 100,
         offset: int = 0,
-    ) -> List[Row]:
-        """List rows, optionally filtered by exact-match extra-column values and ordered."""
-        columns = self._all_column_names()
-        query = f"SELECT {', '.join(columns)} FROM {self.table_name}"
+    ) -> List[T]:
+        """List values, optionally filtered by exact-match extra-column values and ordered."""
+        query = f"SELECT {', '.join(self._all_column_names())} FROM {self.table_name}"
         params: list = []
 
         for column, value in (filters or {}).items():
@@ -200,7 +192,4 @@ class IndexedPostgresStore(AsyncPostgresStore[str, T], Generic[T]):
         query += f" OFFSET ${len(params)}"
 
         rows = await self._fetch(query, *params)
-        return [self._row_to_generic(row) for row in rows]
-
-    def _all_column_names(self) -> List[str]:
-        return [self.key_column, *(col.name for col in self.extra_columns), self.value_column]
+        return [self._row_to_value(row) for row in rows]
