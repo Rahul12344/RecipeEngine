@@ -155,5 +155,20 @@ class UserIngredientInventoryStoreRoundTripTest(unittest.IsolatedAsyncioTestCase
         self.assertEqual(self._mock_create_pool.call_count, 1)
 
 
+class UserIngredientInventoryStoreConfigTest(unittest.TestCase):
+    """`RECIPE_ENGINE_DATABASE_URL` is shared with RecipeStore/RecipeAnnotationStore --
+    all three stores live in the same Postgres database, just different tables."""
+
+    @mock.patch.dict("os.environ", {}, clear=True)
+    def test_missing_connection_string_raises_a_clear_error(self):
+        with self.assertRaisesRegex(RuntimeError, "RECIPE_ENGINE_DATABASE_URL"):
+            UserIngredientInventoryStore()
+
+    @mock.patch.dict("os.environ", {"RECIPE_ENGINE_DATABASE_URL": "postgresql://x/y"})
+    def test_connection_string_is_read_from_the_shared_env_var(self):
+        store = UserIngredientInventoryStore()
+        self.assertEqual(store._kv_store.connection_string, "postgresql://x/y")
+
+
 if __name__ == "__main__":
     unittest.main()

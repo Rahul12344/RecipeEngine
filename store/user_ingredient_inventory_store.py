@@ -18,8 +18,9 @@ from models.features.user_ingredient_inventory import InventoryItem, UserIngredi
 DEFAULT_TABLE_NAME = "user_ingredient_inventory"
 DEFAULT_KEY_COLUMN = "user_id"
 DEFAULT_VALUE_COLUMN = "items"
-CONNECTION_STRING_ENV_VAR = "RECIPE_ENGINE_POSTGRES_DSN"
-DEFAULT_CONNECTION_STRING = "postgresql://localhost:5432/recipe_engine"
+# Same env var as store/recipe_store.py and store/recipe_annotation_store.py --
+# all three stores share one Postgres database, just different tables.
+CONNECTION_STRING_ENV_VAR = "RECIPE_ENGINE_DATABASE_URL"
 
 
 @provides("user_ingredient_inventory_store")
@@ -33,12 +34,21 @@ class UserIngredientInventoryStore:
     """
 
     def __init__(self, kv_store: Optional[AsyncKVStore[str, list]] = None):
-        self._kv_store: AsyncKVStore[str, list] = kv_store or AsyncPostgresStore(
-            connection_string=os.environ.get(CONNECTION_STRING_ENV_VAR, DEFAULT_CONNECTION_STRING),
-            table_name=DEFAULT_TABLE_NAME,
-            key_column=DEFAULT_KEY_COLUMN,
-            value_column=DEFAULT_VALUE_COLUMN,
-        )
+        if kv_store is None:
+            connection_string = os.environ.get(CONNECTION_STRING_ENV_VAR)
+            if not connection_string:
+                raise RuntimeError(
+                    f"No Postgres connection string configured for "
+                    f"UserIngredientInventoryStore. Set the {CONNECTION_STRING_ENV_VAR} "
+                    f"environment variable, or pass a pre-built kv_store explicitly."
+                )
+            kv_store = AsyncPostgresStore(
+                connection_string=connection_string,
+                table_name=DEFAULT_TABLE_NAME,
+                key_column=DEFAULT_KEY_COLUMN,
+                value_column=DEFAULT_VALUE_COLUMN,
+            )
+        self._kv_store: AsyncKVStore[str, list] = kv_store
 
     async def get_inventory(self, user_id: str) -> UserIngredientInventory:
         """Return the user's inventory, or an empty one if none is stored."""
