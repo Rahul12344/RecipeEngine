@@ -1,3 +1,9 @@
+from __future__ import annotations
+
+from di import provides
+
+
+@provides("recipe_recommender")
 class RecipeRecommender:
     def __init__(
         self,

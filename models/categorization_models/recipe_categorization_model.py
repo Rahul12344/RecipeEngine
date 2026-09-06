@@ -1,3 +1,9 @@
+from __future__ import annotations
+
+from di import provides
+
+
+@provides("recipe_categorization_model")
 class RecipeCategorizationModel:
     def __call__(
         self,

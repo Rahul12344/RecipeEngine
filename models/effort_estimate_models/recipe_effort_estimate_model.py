@@ -1,3 +1,9 @@
+from __future__ import annotations
+
+from di import provides
+
+
+@provides("recipe_effort_estimate_model")
 class RecipeEffortEstimateModel:
     def __call__(
         self,
