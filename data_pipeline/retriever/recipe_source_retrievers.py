@@ -94,7 +94,16 @@ class BaseRetriever:
     async def _worker(self, session: aiohttp.ClientSession, semaphore: asyncio.Semaphore, output_queue: asyncio.Queue):
         """Worker coroutine fetching pages and yielding RawRecipeData."""
         while True:
-            url, source_metadata = await self._queue.get()
+            try:
+                # A bare `await self._queue.get()` blocks forever once the
+                # queue is empty, so this worker would never become "done"
+                # and scrape()'s all(w.done() for w in workers) termination
+                # check could never be satisfied -- scrape() would hang
+                # forever instead of finishing once there's nothing left to
+                # crawl. Timing out lets an idle worker actually finish.
+                url, source_metadata = await asyncio.wait_for(self._queue.get(), timeout=2.0)
+            except asyncio.TimeoutError:
+                return
 
             async with self._visited_urls_lock:
                 if url in self._visited_urls:
