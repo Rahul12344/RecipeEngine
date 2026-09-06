@@ -7,4 +7,4 @@ class RecipeAnnotationModel:
         self.neer_model = neer_model
 
     def annotate(self, recipe_text: str) -> str:
-        return self.neer_model.annotate(recipe_text)
+        return self.neer_model(recipe_text)

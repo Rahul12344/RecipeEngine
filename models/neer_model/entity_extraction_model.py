@@ -1,4 +1,14 @@
+from __future__ import annotations
+
 import torch
+
+
+class EntityExtractionModel:
+    def __call__(
+        self,
+        features: NEERFeatures
+    ) -> List[RecipeEntity]:
+        pass
 
 class ViterbiCRFModel(EntityExtractionModel, torch.nn.Module):
     pass
@@ -12,11 +22,4 @@ class DiffusionNERModel(EntityExtractionModel, torch.nn.Module):
         pass
 
     def forward(self):
-        pass
-
-class EntityExtractionModel:
-    def __call__(
-        self,
-        features: NEERFeatures
-    ) -> List[RecipeEntity]:
         pass

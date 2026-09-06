@@ -1,5 +1,5 @@
-class CollaborativeFilteringModel(RecipeRecommendationModel):
-    pass
+from __future__ import annotations
+
 
 class RecipeRecommendationModel:
     def __call__(
@@ -8,3 +8,6 @@ class RecipeRecommendationModel:
     ) -> list[Recipe]:
         """Base model for generating recipe predictions."""
         pass
+
+class CollaborativeFilteringModel(RecipeRecommendationModel):
+    pass

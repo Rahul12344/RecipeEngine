@@ -1,7 +1,7 @@
 from bs4 import BeautifulSoup
 import logging
 from typing import Optional
-from transformers.recipe_transformer_interface import RecipeTransformerInterface
+from data_pipeline.transformers.recipe_transformer_interface import RecipeTransformerInterface
 from models.output_data_models.annotation_model_features import (
     Recipe,
     RecipeIngredient,
