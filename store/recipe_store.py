@@ -1,14 +1,11 @@
 """
-Postgres-backed persistence for parsed `Recipe` objects.
+Persistence for parsed `Recipe` objects.
 
-`recipe_backing_store` (a DI provider *function*, not a class -- see
-di/provides.py) builds a fully-configured IndexedPostgresStore for the
-`recipes` table: it owns the table name, extra indexable columns (source,
-url, name, ingested_at), and the Recipe <-> JSON mapping. RecipeStore itself
-is a plain class with no SQL, table names, or JSONB in it at all -- it's
-injected with that backing store and only translates between Recipe-shaped
-method calls (save_recipe/get_recipe/get_by_url/list_recipes) and the
-backing store's generic (upsert/get_row/get_row_by_column/list_rows) API.
+This class has no Postgres-specific code at all: it's injected (via DI, see
+store/postgres/recipe_backing_store.py) with a generic, already-configured
+backing store and only translates between Recipe-shaped method calls
+(save_recipe/get_recipe/get_by_url/list_recipes) and that backing store's
+generic (upsert/get_row/get_row_by_column/list_rows) API.
 
 Query patterns for recipes beyond "by id/url/source" aren't known yet, so
 the full nested Recipe (ingredients + instructions) lives in a single JSONB
@@ -24,13 +21,9 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Optional
 
-from async_store.indexed_postgres_store import IndexedColumn, IndexedPostgresStore, Row
+from async_store.indexed_postgres_store import IndexedPostgresStore, Row
 from di import provides
-from models.output_data_models.annotation_model_features import (
-    Recipe,
-    RecipeIngredient,
-    RecipeInstruction,
-)
+from models.output_data_models.annotation_model_features import Recipe
 
 
 def recipe_id_for_url(url: str) -> str:
@@ -55,78 +48,6 @@ class StoredRecipe:
     name: str
     ingested_at: datetime
     recipe: Recipe
-
-
-def _ingredient_to_dict(ingredient: RecipeIngredient) -> dict:
-    return {
-        "name": ingredient.name,
-        "quantity": ingredient.quantity,
-        "unit": ingredient.unit,
-        "process": ingredient.process,
-    }
-
-
-def _ingredient_from_dict(data: dict) -> RecipeIngredient:
-    return RecipeIngredient(
-        name=data["name"],
-        quantity=data["quantity"],
-        unit=data["unit"],
-        process=data.get("process"),
-    )
-
-
-def _instruction_to_dict(instruction: RecipeInstruction) -> dict:
-    return {
-        "step": instruction.step,
-        "description": instruction.description,
-        "list_of_ingredients_for_step": [
-            _ingredient_to_dict(i) for i in instruction.list_of_ingredients_for_step
-        ],
-    }
-
-
-def _instruction_from_dict(data: dict) -> RecipeInstruction:
-    return RecipeInstruction(
-        step=data["step"],
-        description=data["description"],
-        list_of_ingredients_for_step=[
-            _ingredient_from_dict(i) for i in data.get("list_of_ingredients_for_step", [])
-        ],
-    )
-
-
-def recipe_to_dict(recipe: Recipe) -> dict:
-    """Serialize a Recipe into a plain JSON-able dict (for the JSONB column)."""
-    return {
-        "name": recipe.name,
-        "total_ingredients": [_ingredient_to_dict(i) for i in recipe.total_ingredients],
-        "instructions": [_instruction_to_dict(i) for i in recipe.instructions],
-    }
-
-
-def recipe_from_dict(data: dict) -> Recipe:
-    """Deserialize a Recipe (and its nested frozen dataclasses) back from a plain dict."""
-    return Recipe(
-        name=data["name"],
-        total_ingredients=[_ingredient_from_dict(i) for i in data.get("total_ingredients", [])],
-        instructions=[_instruction_from_dict(i) for i in data.get("instructions", [])],
-    )
-
-
-@provides("recipe_backing_store")
-def build_recipe_backing_store() -> IndexedPostgresStore[Recipe]:
-    return IndexedPostgresStore(
-        table_name="recipes",
-        key_column="id",
-        extra_columns=(
-            IndexedColumn("source"),
-            IndexedColumn("url", unique=True),
-            IndexedColumn("name"),
-            IndexedColumn("ingested_at", sql_type="TIMESTAMPTZ"),
-        ),
-        serialize=recipe_to_dict,
-        deserialize=recipe_from_dict,
-    )
 
 
 @provides("recipe_store")

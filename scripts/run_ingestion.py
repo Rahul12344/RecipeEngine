@@ -46,6 +46,7 @@ from data_pipeline.meta_info.food_network_source_metadata import FoodNetworkSour
 from data_pipeline.retriever.recipe_source_retrievers import BaseRetriever  # noqa: E402
 from data_pipeline.transformers.transformer_registry import default_transformers  # noqa: E402
 from async_store.indexed_postgres_store import DATABASE_URL_ENV_VAR  # noqa: E402
+from store.postgres.recipe_backing_store import build_recipe_backing_store  # noqa: E402,F401 (registers 'recipe_backing_store' with DI)
 from store.recipe_store import RecipeStore  # noqa: E402
 
 logging.basicConfig(

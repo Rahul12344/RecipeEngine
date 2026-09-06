@@ -24,13 +24,8 @@ from models.output_data_models.annotation_model_features import (
     RecipeIngredient,
     RecipeInstruction,
 )
-from store.recipe_store import (
-    RecipeStore,
-    build_recipe_backing_store,
-    recipe_from_dict,
-    recipe_id_for_url,
-    recipe_to_dict,
-)
+from store.postgres.recipe_backing_store import build_recipe_backing_store
+from store.recipe_store import RecipeStore, recipe_id_for_url
 from store.tests.fake_asyncpg import FakeAsyncpgPool
 
 
@@ -83,8 +78,8 @@ class RecipeSerializationRoundTripTest(unittest.TestCase):
 
     def test_round_trip_preserves_all_fields_and_types(self):
         recipe = _sample_recipe()
-        data = recipe_to_dict(recipe)
-        restored = recipe_from_dict(data)
+        data = recipe.to_dict()
+        restored = Recipe.from_dict(data)
 
         self.assertEqual(restored, recipe)
         self.assertIsInstance(restored, Recipe)
@@ -102,13 +97,13 @@ class RecipeSerializationRoundTripTest(unittest.TestCase):
         import json
 
         recipe = _sample_recipe()
-        json_text = json.dumps(recipe_to_dict(recipe))
-        restored = recipe_from_dict(json.loads(json_text))
+        json_text = json.dumps(recipe.to_dict())
+        restored = Recipe.from_dict(json.loads(json_text))
         self.assertEqual(restored, recipe)
 
     def test_round_trip_with_empty_ingredients_and_instructions(self):
         recipe = Recipe(name="Empty", total_ingredients=[], instructions=[])
-        restored = recipe_from_dict(recipe_to_dict(recipe))
+        restored = Recipe.from_dict(recipe.to_dict())
         self.assertEqual(restored, recipe)
 
     def test_round_trip_preserves_optional_process_field(self):
@@ -117,7 +112,7 @@ class RecipeSerializationRoundTripTest(unittest.TestCase):
             total_ingredients=[RecipeIngredient(name="salt", quantity=1.0, unit="tsp", process=None)],
             instructions=[],
         )
-        restored = recipe_from_dict(recipe_to_dict(recipe))
+        restored = Recipe.from_dict(recipe.to_dict())
         self.assertIsNone(restored.total_ingredients[0].process)
 
 
@@ -253,8 +248,8 @@ class LivePostgresRecipeStoreTest(unittest.IsolatedAsyncioTestCase):
                 IndexedColumn("name"),
                 IndexedColumn("ingested_at", sql_type="TIMESTAMPTZ"),
             ),
-            serialize=recipe_to_dict,
-            deserialize=recipe_from_dict,
+            serialize=Recipe.to_dict,
+            deserialize=Recipe.from_dict,
         )
         self.store = RecipeStore(recipe_backing_store=self.backing_store)
         pool = await self.backing_store._ensure_connection()

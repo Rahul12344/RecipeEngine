@@ -17,12 +17,8 @@ from models.output_data_models.annotation_model_features import (
     RecipeAnnotation,
     RecipeMetadata,
 )
-from store.recipe_annotation_store import (
-    RecipeAnnotationStore,
-    annotation_from_dict,
-    annotation_to_dict,
-    build_recipe_annotation_backing_store,
-)
+from store.postgres.recipe_annotation_backing_store import build_recipe_annotation_backing_store
+from store.recipe_annotation_store import RecipeAnnotationStore
 from store.tests.fake_asyncpg import FakeAsyncpgPool
 
 
@@ -45,7 +41,7 @@ def _sample_annotation() -> RecipeAnnotation:
 class RecipeAnnotationSerializationRoundTripTest(unittest.TestCase):
     def test_round_trip_preserves_enums_and_nested_dataclasses(self):
         annotation = _sample_annotation()
-        restored = annotation_from_dict(annotation_to_dict(annotation))
+        restored = RecipeAnnotation.from_dict(annotation.to_dict())
         self.assertEqual(restored, annotation)
         self.assertIsInstance(restored.recipe_metadata.diet, Diet)
         self.assertTrue(all(isinstance(t, DietTag) for t in restored.recipe_metadata.diet_tags))
@@ -54,8 +50,8 @@ class RecipeAnnotationSerializationRoundTripTest(unittest.TestCase):
         import json
 
         annotation = _sample_annotation()
-        json_text = json.dumps(annotation_to_dict(annotation))
-        restored = annotation_from_dict(json.loads(json_text))
+        json_text = json.dumps(annotation.to_dict())
+        restored = RecipeAnnotation.from_dict(json.loads(json_text))
         self.assertEqual(restored, annotation)
 
 
