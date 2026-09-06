@@ -16,4 +16,4 @@ class RecipeRecommender:
         user: User,
         recommendation_options: RecommendationOptions
     ) -> List[Recipe]:
-        return recommender_pipeline(user, recommendation_options)
+        return self._recommender_pipeline(user, recommendation_options)

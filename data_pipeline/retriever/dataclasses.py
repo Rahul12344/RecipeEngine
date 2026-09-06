@@ -9,13 +9,13 @@ class ScrapeResponse:
     source: str
     url: str
 
+class IngestionType(Enum):
+    INCREMENTAL = "incremental"
+    FULL = "full"
+
 @dataclass
 class ScrapeRequest:
     """Data class for a request to scrape a source"""
     source_metadata: SourceMetadata
     ingestion_type: IngestionType
     url: str | None = None
-
-class IngestionType(Enum):
-    INCREMENTAL = "incremental"
-    FULL = "full"
