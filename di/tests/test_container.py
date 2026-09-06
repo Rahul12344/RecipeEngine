@@ -66,5 +66,71 @@ class SingletonWiringTest(unittest.TestCase):
             container().get(Consumer)
 
 
+class FunctionProviderTest(unittest.TestCase):
+    """@provides also accepts a zero-arg function, not just a class -- for
+    building a singleton whose construction needs logic beyond a class's own
+    __init__ (e.g. a generically-configured instance of a shared class)."""
+
+    def setUp(self):
+        reset_container()
+
+    def test_function_provider_is_registered_and_not_a_class(self):
+        @provides("test_widget_from_function")
+        def build_widget():
+            return {"built": True}
+
+        providers = get_providers()
+        self.assertIn("test_widget_from_function", providers)
+        self.assertFalse(hasattr(providers["test_widget_from_function"], "__di_name__"))
+
+    def test_function_provider_result_is_injected_by_matching_param_name(self):
+        @provides("test_widget_a")
+        def build_widget():
+            return {"built": True}
+
+        class Consumer:
+            def __init__(self, test_widget_a):
+                self.widget = test_widget_a
+
+        consumer = container().get(Consumer)
+        self.assertEqual(consumer.widget, {"built": True})
+
+    def test_function_provider_is_called_once_and_memoized_as_a_singleton(self):
+        call_count = 0
+
+        @provides("test_widget_b")
+        def build_widget():
+            nonlocal call_count
+            call_count += 1
+            return object()
+
+        class ConsumerA:
+            def __init__(self, test_widget_b):
+                self.widget = test_widget_b
+
+        class ConsumerB:
+            def __init__(self, test_widget_b):
+                self.widget = test_widget_b
+
+        a = container().get(ConsumerA)
+        b = container().get(ConsumerB)
+        self.assertIs(a.widget, b.widget)
+        self.assertEqual(call_count, 1)
+
+    def test_class_and_function_providers_can_be_mixed_in_one_consumer(self):
+        @provides("test_widget_c")
+        def build_widget():
+            return "from a function"
+
+        class Consumer:
+            def __init__(self, test_widget_c, recipe_annotation_store: RecipeAnnotationStore):
+                self.widget = test_widget_c
+                self.store = recipe_annotation_store
+
+        consumer = container().get(Consumer)
+        self.assertEqual(consumer.widget, "from a function")
+        self.assertIsInstance(consumer.store, RecipeAnnotationStore)
+
+
 if __name__ == "__main__":
     unittest.main()
