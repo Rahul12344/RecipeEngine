@@ -86,6 +86,13 @@ class _FakeS3Client:
         self.put_objects.append(kwargs)
 
 
+class _FailingS3Client:
+    """Simulates S3 being unreachable/unconfigured (e.g. invalid credentials)."""
+
+    async def put_object(self, **kwargs):
+        raise RuntimeError("simulated S3 failure (e.g. invalid credentials)")
+
+
 class _FakeS3ClientContext:
     def __init__(self, client: _FakeS3Client):
         self._client = client
@@ -199,6 +206,31 @@ class IngesterTransformAndStoreWiringTest(unittest.IsolatedAsyncioTestCase):
             await ingester.ingest()
 
         self.assertEqual(len(s3_client.put_objects), 1)
+
+    async def test_s3_archive_failure_does_not_block_transform_and_store(self):
+        recipe = Recipe(name="Test Recipe", total_ingredients=[], instructions=[])
+        source_metadata = _FakeSourceMetadata("good_source")
+        page = RawRecipeData(html="<html></html>", source="good_source", url="https://good_source.example.com/recipe/1")
+
+        retriever = _FakeRetriever({"good_source": [page]})
+        recipe_store = _FakeRecipeStore()
+
+        ingester = Ingester(
+            recipe_source_retriever=retriever,
+            supported_sources=[source_metadata],
+            transformers={"good_source": _FakeTransformer(recipe)},
+            recipe_store=recipe_store,
+        )
+
+        # S3 raises on every put_object -- e.g. unconfigured/invalid AWS
+        # credentials -- and ingest() must still complete and still persist
+        # the transformed recipe to Postgres, not raise/abort the whole
+        # asyncio.gather.
+        with patch("data_pipeline.ingester.aioboto3.Session", return_value=_FakeAioboto3Session(_FailingS3Client())):
+            await ingester.ingest()
+
+        self.assertEqual(len(recipe_store.saved), 1)
+        self.assertEqual(recipe_store.saved[0][0], recipe)
 
 
 if __name__ == "__main__":

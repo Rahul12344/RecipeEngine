@@ -16,7 +16,6 @@ Usage:
 Required environment variable:
     RECIPE_ENGINE_DATABASE_URL - Postgres connection string, e.g.
         postgresql://user:password@localhost:5432/recipe_engine
-    (see .env.example at the repo root)
 
 AWS credentials for the S3 archive step are picked up from the standard
 boto3 credential chain (env vars / ~/.aws/credentials / instance role).
@@ -45,7 +44,8 @@ from data_pipeline.meta_info.food_dot_com_source_metadata import FoodDotComSourc
 from data_pipeline.meta_info.food_network_source_metadata import FoodNetworkSourceMetadata  # noqa: E402
 from data_pipeline.retriever.recipe_source_retrievers import BaseRetriever  # noqa: E402
 from data_pipeline.transformers.transformer_registry import default_transformers  # noqa: E402
-from store.recipe_store import DATABASE_URL_ENV_VAR, RecipeStore  # noqa: E402
+from async_store.indexed_postgres_store import DATABASE_URL_ENV_VAR  # noqa: E402
+from store.recipe_store import RecipeStore  # noqa: E402
 
 logging.basicConfig(
     level=logging.INFO,
@@ -58,7 +58,8 @@ async def _run() -> None:
     database_url = os.environ.get(DATABASE_URL_ENV_VAR)
     if not database_url:
         raise RuntimeError(
-            f"{DATABASE_URL_ENV_VAR} is not set. See .env.example at the repo root."
+            f"{DATABASE_URL_ENV_VAR} is not set (a Postgres connection string, "
+            f"e.g. postgresql://user:password@localhost:5432/recipe_engine)."
         )
 
     recipe_store = RecipeStore(connection_string=database_url)

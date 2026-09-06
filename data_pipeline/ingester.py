@@ -52,11 +52,19 @@ class Ingester:
             await asyncio.gather(*tasks)
 
     async def _archive_raw_html(self, recipe: RawRecipeData, s3_client) -> None:
-        await s3_client.put_object(
-            Bucket='recipe-data',
-            Key=f'{recipe.source}/{recipe.url.split("/")[-1]}',
-            Body=recipe.html
-        )
+        try:
+            await s3_client.put_object(
+                Bucket='recipe-data',
+                Key=f'{recipe.source}/{recipe.url.split("/")[-1]}',
+                Body=recipe.html
+            )
+        except Exception as e:
+            # Isolated the same way _transform_and_store isolates its own
+            # failures: one recipe's S3 archive failing (or S3 being
+            # unconfigured entirely) shouldn't take down the whole
+            # asyncio.gather in ingest(), including the unrelated Postgres
+            # transform+store path for every other recipe.
+            logger.error(f"Error archiving {recipe.url} to S3: {e}", exc_info=True)
 
     async def _transform_and_store(self, recipe: RawRecipeData) -> None:
         if self._recipe_store is None:

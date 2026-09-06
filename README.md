@@ -54,7 +54,7 @@ persists structured `Recipe` data to Postgres. It does one pass and exits --
 there is no long-running internal scheduler -- so it's meant to be triggered
 by an OS-level scheduler.
 
-Configuration: copy `.env.example` to `.env` and set `RECIPE_ENGINE_DATABASE_URL`
+Configuration: set the `RECIPE_ENGINE_DATABASE_URL` environment variable
 (a Postgres connection string) plus AWS credentials for the S3 archive step.
 
 ### Scheduling ingestion

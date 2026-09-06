@@ -1,7 +1,7 @@
 """
 Postgres-backed persistence for `RecipeAnnotation` (the further-annotated,
 NER-enriched pipeline output). Built the same way as store/recipe_store.py:
-on top of AsyncPostgresStore's connection-pool/table plumbing, with
+on IndexedPostgresStore, which owns all connection/table/query plumbing, with
 serialize/deserialize round-tripping into the real frozen dataclasses
 (including the Diet/DietTag enums) rather than raw dicts.
 
@@ -19,11 +19,9 @@ human-meaningful secondary lookup available on this data today.
 from __future__ import annotations
 
 import json
-import logging
-import os
 from typing import Optional
 
-from async_store.async_postgres_store import AsyncPostgresStore
+from async_store.indexed_postgres_store import IndexedColumn, IndexedPostgresStore
 from di import provides
 from models.output_data_models.annotation_model_features import (
     Diet,
@@ -32,9 +30,7 @@ from models.output_data_models.annotation_model_features import (
     RecipeAnnotation,
     RecipeMetadata,
 )
-from store.recipe_store import DATABASE_URL_ENV_VAR, recipe_from_dict, recipe_to_dict
-
-logger = logging.getLogger(__name__)
+from store.recipe_store import recipe_from_dict, recipe_to_dict
 
 
 def _effort_to_dict(effort: Effort) -> dict:
@@ -88,43 +84,13 @@ def annotation_from_dict(data: dict) -> RecipeAnnotation:
 
 
 @provides("recipe_annotation_store")
-class RecipeAnnotationStore(AsyncPostgresStore[str, RecipeAnnotation]):
+class RecipeAnnotationStore(IndexedPostgresStore[RecipeAnnotation]):
     """Persists RecipeAnnotation objects to Postgres, keyed by recipe id."""
 
+    extra_columns = (IndexedColumn("sort_key"),)
+
     def __init__(self, connection_string: Optional[str] = None, table_name: str = "recipe_annotations"):
-        # See RecipeStore for why this defaults to None instead of being a
-        # required arg: it keeps this class (registered via @provides)
-        # zero-arg constructible for the DI container.
-        super().__init__(
-            connection_string=connection_string or os.environ.get(DATABASE_URL_ENV_VAR),
-            table_name=table_name,
-            key_column="recipe_id",
-            value_column="data",
-            create_table=True,
-        )
-
-    async def _ensure_connection(self):
-        if not self.connection_string:
-            raise RuntimeError(
-                f"No Postgres connection string configured for RecipeAnnotationStore. "
-                f"Set the {DATABASE_URL_ENV_VAR} environment variable or pass "
-                f"connection_string explicitly."
-            )
-        return await super()._ensure_connection()
-
-    async def _create_table_if_not_exists(self) -> None:
-        async with self._pool.acquire() as conn:
-            await conn.execute(f"""
-                CREATE TABLE IF NOT EXISTS {self.table_name} (
-                    {self.key_column} TEXT PRIMARY KEY,
-                    sort_key TEXT,
-                    {self.value_column} JSONB NOT NULL
-                )
-            """)
-            await conn.execute(f"""
-                CREATE INDEX IF NOT EXISTS {self.table_name}_sort_key_idx
-                ON {self.table_name} (sort_key)
-            """)
+        super().__init__(connection_string=connection_string, table_name=table_name, key_column="recipe_id")
 
     def _serialize_value(self, value: RecipeAnnotation) -> str:
         return json.dumps(annotation_to_dict(value))
@@ -134,29 +100,7 @@ class RecipeAnnotationStore(AsyncPostgresStore[str, RecipeAnnotation]):
         return annotation_from_dict(data)
 
     async def store(self, recipe_id: str, annotation: RecipeAnnotation) -> None:
-        pool = await self._ensure_connection()
-        sort_key = annotation.recipe.name
-        data = self._serialize_value(annotation)
-
-        async with pool.acquire() as conn:
-            await conn.execute(
-                f"""
-                INSERT INTO {self.table_name} ({self.key_column}, sort_key, {self.value_column})
-                VALUES ($1, $2, $3::jsonb)
-                ON CONFLICT ({self.key_column}) DO UPDATE SET
-                    sort_key = EXCLUDED.sort_key,
-                    {self.value_column} = EXCLUDED.{self.value_column}
-                """,
-                recipe_id,
-                sort_key,
-                data,
-            )
+        await self._upsert(recipe_id, annotation, sort_key=annotation.recipe.name)
 
     async def get_by_sort_key(self, sort_key: str) -> Optional[RecipeAnnotation]:
-        pool = await self._ensure_connection()
-        async with pool.acquire() as conn:
-            row = await conn.fetchrow(
-                f"SELECT {self.value_column} FROM {self.table_name} WHERE sort_key = $1 LIMIT 1",
-                sort_key,
-            )
-        return self._deserialize_value(row[self.value_column]) if row is not None else None
+        return await self._get_by_column("sort_key", sort_key)
