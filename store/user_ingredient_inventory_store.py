@@ -1,34 +1,17 @@
-"""Postgres-backed persistence for a user's ingredient inventory.
+"""Persistence for a user's ingredient inventory.
 
-`user_ingredient_inventory_backing_store` (a DI provider *function* -- see
-di/provides.py) builds a fully-configured IndexedPostgresStore for the
-`user_ingredient_inventory` table: each user's inventory is a JSONB list of
-ingredient-item dicts, keyed by user_id, no extra indexed columns needed.
-UserIngredientInventoryStore itself is a plain class with no SQL, table
-names, or JSONB in it -- it's injected with that backing store and only
-translates between inventory-shaped method calls and the backing store's
-generic get/set.
+This class has no Postgres-specific code at all: it's injected (via DI, see
+store/postgres/user_ingredient_inventory_backing_store.py) with a generic,
+already-configured backing store and only translates between
+UserIngredientInventory-shaped method calls and that backing store's
+generic get/set, using InventoryItem's own to_dict/from_dict for the
+item <-> dict conversion.
 """
 from __future__ import annotations
-
-from dataclasses import asdict
 
 from async_store.indexed_postgres_store import IndexedPostgresStore
 from di import provides
 from models.features.user_ingredient_inventory import InventoryItem, UserIngredientInventory
-
-DEFAULT_TABLE_NAME = "user_ingredient_inventory"
-DEFAULT_KEY_COLUMN = "user_id"
-DEFAULT_VALUE_COLUMN = "items"
-
-
-@provides("user_ingredient_inventory_backing_store")
-def build_user_ingredient_inventory_backing_store() -> IndexedPostgresStore[list]:
-    return IndexedPostgresStore(
-        table_name=DEFAULT_TABLE_NAME,
-        key_column=DEFAULT_KEY_COLUMN,
-        value_column=DEFAULT_VALUE_COLUMN,
-    )
 
 
 @provides("user_ingredient_inventory_store")
@@ -45,12 +28,12 @@ class UserIngredientInventoryStore:
             return UserIngredientInventory(user_id=user_id, items=[])
         return UserIngredientInventory(
             user_id=user_id,
-            items=[InventoryItem(**item) for item in raw_items],
+            items=[InventoryItem.from_dict(item) for item in raw_items],
         )
 
     async def set_inventory(self, inventory: UserIngredientInventory) -> None:
         """Overwrite the user's entire inventory."""
-        await self._backing_store.set(inventory.user_id, [asdict(item) for item in inventory.items])
+        await self._backing_store.set(inventory.user_id, [item.to_dict() for item in inventory.items])
 
     async def add_item(self, user_id: str, item: InventoryItem) -> UserIngredientInventory:
         """Add (or replace, by name) a single item in the user's inventory."""

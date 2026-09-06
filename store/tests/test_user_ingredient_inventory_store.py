@@ -13,11 +13,9 @@ from unittest import mock
 from unittest.mock import AsyncMock
 
 from models.features.user_ingredient_inventory import InventoryItem, UserIngredientInventory
+from store.postgres.user_ingredient_inventory_backing_store import build_user_ingredient_inventory_backing_store
 from store.tests.fake_asyncpg import FakeAsyncpgPool
-from store.user_ingredient_inventory_store import (
-    UserIngredientInventoryStore,
-    build_user_ingredient_inventory_backing_store,
-)
+from store.user_ingredient_inventory_store import UserIngredientInventoryStore
 
 
 class UserIngredientInventoryStoreRoundTripTest(unittest.IsolatedAsyncioTestCase):

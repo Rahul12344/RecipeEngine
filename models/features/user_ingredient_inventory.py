@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 
 
@@ -8,6 +10,13 @@ class InventoryItem:
     name: str
     quantity: float | None = None
     unit: str | None = None
+
+    def to_dict(self) -> dict:
+        return {"name": self.name, "quantity": self.quantity, "unit": self.unit}
+
+    @classmethod
+    def from_dict(cls, data: dict) -> InventoryItem:
+        return cls(name=data["name"], quantity=data.get("quantity"), unit=data.get("unit"))
 
 
 @dataclass(frozen=True)
