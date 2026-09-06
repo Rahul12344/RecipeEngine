@@ -1,9 +1,14 @@
 """
 Postgres-backed persistence for `RecipeAnnotation` (the further-annotated,
-NER-enriched pipeline output). Built the same way as store/recipe_store.py:
-on IndexedPostgresStore, which owns all connection/table/query plumbing, with
-serialize/deserialize round-tripping into the real frozen dataclasses
-(including the Diet/DietTag enums) rather than raw dicts.
+NER-enriched pipeline output).
+
+`recipe_annotation_backing_store` (a DI provider *function* -- see
+di/provides.py) builds a fully-configured IndexedPostgresStore for the
+`recipe_annotations` table. RecipeAnnotationStore itself is a plain class
+with no SQL, table names, or JSONB in it -- it's injected with that backing
+store and only translates between RecipeAnnotation-shaped method calls
+(store/get/get_by_sort_key) and the backing store's generic
+(upsert/get/get_by_column) API.
 
 Note: RecipeAnnotation's own NER annotation models are still unimplemented
 stubs elsewhere in the codebase (see models/neer_model), so nothing
@@ -18,7 +23,6 @@ human-meaningful secondary lookup available on this data today.
 """
 from __future__ import annotations
 
-import json
 from typing import Optional
 
 from async_store.indexed_postgres_store import IndexedColumn, IndexedPostgresStore
@@ -83,24 +87,32 @@ def annotation_from_dict(data: dict) -> RecipeAnnotation:
     )
 
 
+@provides("recipe_annotation_backing_store")
+def build_recipe_annotation_backing_store() -> IndexedPostgresStore[RecipeAnnotation]:
+    return IndexedPostgresStore(
+        table_name="recipe_annotations",
+        key_column="recipe_id",
+        extra_columns=(IndexedColumn("sort_key"),),
+        serialize=annotation_to_dict,
+        deserialize=annotation_from_dict,
+    )
+
+
 @provides("recipe_annotation_store")
-class RecipeAnnotationStore(IndexedPostgresStore[RecipeAnnotation]):
-    """Persists RecipeAnnotation objects to Postgres, keyed by recipe id."""
+class RecipeAnnotationStore:
+    """Persists RecipeAnnotation objects, keyed by recipe id. No SQL/Postgres details here."""
 
-    extra_columns = (IndexedColumn("sort_key"),)
-
-    def __init__(self, connection_string: Optional[str] = None, table_name: str = "recipe_annotations"):
-        super().__init__(connection_string=connection_string, table_name=table_name, key_column="recipe_id")
-
-    def _serialize_value(self, value: RecipeAnnotation) -> str:
-        return json.dumps(annotation_to_dict(value))
-
-    def _deserialize_value(self, json_str) -> RecipeAnnotation:
-        data = json.loads(json_str) if isinstance(json_str, str) else json_str
-        return annotation_from_dict(data)
+    def __init__(self, recipe_annotation_backing_store: IndexedPostgresStore):
+        self._backing_store = recipe_annotation_backing_store
 
     async def store(self, recipe_id: str, annotation: RecipeAnnotation) -> None:
-        await self._upsert(recipe_id, annotation, sort_key=annotation.recipe.name)
+        await self._backing_store.upsert(recipe_id, annotation, sort_key=annotation.recipe.name)
+
+    async def get(self, recipe_id: str) -> Optional[RecipeAnnotation]:
+        return await self._backing_store.get(recipe_id)
 
     async def get_by_sort_key(self, sort_key: str) -> Optional[RecipeAnnotation]:
-        return await self._get_by_column("sort_key", sort_key)
+        return await self._backing_store.get_by_column("sort_key", sort_key)
+
+    async def close(self) -> None:
+        await self._backing_store.close()

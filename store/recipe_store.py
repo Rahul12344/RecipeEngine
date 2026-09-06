@@ -1,28 +1,30 @@
 """
 Postgres-backed persistence for parsed `Recipe` objects.
 
-Built on IndexedPostgresStore (async_store/indexed_postgres_store.py), which
-owns all connection/table/query plumbing; this class only supplies the
-schema (extra_columns), the Recipe <-> JSON mapping, and its own query
-methods -- it never touches a connection pool directly.
+`recipe_backing_store` (a DI provider *function*, not a class -- see
+di/provides.py) builds a fully-configured IndexedPostgresStore for the
+`recipes` table: it owns the table name, extra indexable columns (source,
+url, name, ingested_at), and the Recipe <-> JSON mapping. RecipeStore itself
+is a plain class with no SQL, table names, or JSONB in it at all -- it's
+injected with that backing store and only translates between Recipe-shaped
+method calls (save_recipe/get_recipe/get_by_url/list_recipes) and the
+backing store's generic (upsert/get_row/get_row_by_column/list_rows) API.
 
 Query patterns for recipes beyond "by id/url/source" aren't known yet, so
 the full nested Recipe (ingredients + instructions) lives in a single JSONB
-column, plus a handful of real, indexable columns (source, url, name,
-ingested_at) for the lookups that are obviously going to be needed. That's a
-deliberate middle ground between a fully normalized multi-table schema
-(premature) and dumping everything into an opaque blob (would make even
-"recipes from source X" require a full scan).
+column, plus a handful of real, indexable columns for the lookups that are
+obviously going to be needed. That's a deliberate middle ground between a
+fully normalized multi-table schema (premature) and dumping everything into
+an opaque blob (would make even "recipes from source X" require a full scan).
 """
 from __future__ import annotations
 
 import hashlib
-import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Optional
 
-from async_store.indexed_postgres_store import IndexedColumn, IndexedPostgresStore
+from async_store.indexed_postgres_store import IndexedColumn, IndexedPostgresStore, Row
 from di import provides
 from models.output_data_models.annotation_model_features import (
     Recipe,
@@ -111,26 +113,28 @@ def recipe_from_dict(data: dict) -> Recipe:
     )
 
 
-@provides("recipe_store")
-class RecipeStore(IndexedPostgresStore[Recipe]):
-    """Persists parsed Recipe objects to Postgres, keyed by a hash of their source URL."""
-
-    extra_columns = (
-        IndexedColumn("source"),
-        IndexedColumn("url", unique=True),
-        IndexedColumn("name"),
-        IndexedColumn("ingested_at", sql_type="TIMESTAMPTZ"),
+@provides("recipe_backing_store")
+def build_recipe_backing_store() -> IndexedPostgresStore[Recipe]:
+    return IndexedPostgresStore(
+        table_name="recipes",
+        key_column="id",
+        extra_columns=(
+            IndexedColumn("source"),
+            IndexedColumn("url", unique=True),
+            IndexedColumn("name"),
+            IndexedColumn("ingested_at", sql_type="TIMESTAMPTZ"),
+        ),
+        serialize=recipe_to_dict,
+        deserialize=recipe_from_dict,
     )
 
-    def __init__(self, connection_string: Optional[str] = None, table_name: str = "recipes"):
-        super().__init__(connection_string=connection_string, table_name=table_name, key_column="id")
 
-    def _serialize_value(self, value: Recipe) -> str:
-        return json.dumps(recipe_to_dict(value))
+@provides("recipe_store")
+class RecipeStore:
+    """Persists parsed Recipe objects, keyed by a hash of their source URL. No SQL/Postgres details here."""
 
-    def _deserialize_value(self, json_str) -> Recipe:
-        data = json.loads(json_str) if isinstance(json_str, str) else json_str
-        return recipe_from_dict(data)
+    def __init__(self, recipe_backing_store: IndexedPostgresStore):
+        self._backing_store = recipe_backing_store
 
     async def save_recipe(self, recipe: Recipe, source: str, url: str) -> str:
         """
@@ -139,7 +143,7 @@ class RecipeStore(IndexedPostgresStore[Recipe]):
         creating a duplicate). Returns the recipe id.
         """
         recipe_id = recipe_id_for_url(url)
-        await self._upsert(
+        await self._backing_store.upsert(
             recipe_id,
             recipe,
             source=source,
@@ -151,10 +155,7 @@ class RecipeStore(IndexedPostgresStore[Recipe]):
 
     async def get_recipe(self, recipe_id: str) -> Optional[StoredRecipe]:
         """Fetch a stored recipe by id."""
-        row = await self._fetchrow(
-            f"SELECT id, source, url, name, ingested_at, data FROM {self.table_name} WHERE id = $1",
-            recipe_id,
-        )
+        row = await self._backing_store.get_row(recipe_id)
         return self._row_to_stored_recipe(row) if row is not None else None
 
     async def get_by_url(self, url: str) -> Optional[StoredRecipe]:
@@ -168,26 +169,24 @@ class RecipeStore(IndexedPostgresStore[Recipe]):
         offset: int = 0,
     ) -> list[StoredRecipe]:
         """List stored recipes, optionally filtered by source, newest-ingested first."""
-        base_query = f"SELECT id, source, url, name, ingested_at, data FROM {self.table_name}"
-        params: list = []
-        if source is not None:
-            params.append(source)
-            base_query += f" WHERE source = ${len(params)}"
-        base_query += " ORDER BY ingested_at DESC"
-        params.append(limit)
-        base_query += f" LIMIT ${len(params)}"
-        params.append(offset)
-        base_query += f" OFFSET ${len(params)}"
-
-        rows = await self._fetch(base_query, *params)
+        rows = await self._backing_store.list_rows(
+            filters={"source": source} if source is not None else None,
+            order_by="ingested_at",
+            descending=True,
+            limit=limit,
+            offset=offset,
+        )
         return [self._row_to_stored_recipe(row) for row in rows]
 
-    def _row_to_stored_recipe(self, row) -> StoredRecipe:
+    async def close(self) -> None:
+        await self._backing_store.close()
+
+    def _row_to_stored_recipe(self, row: Row) -> StoredRecipe:
         return StoredRecipe(
-            id=row["id"],
-            source=row["source"],
-            url=row["url"],
-            name=row["name"],
-            ingested_at=row["ingested_at"],
-            recipe=self._deserialize_value(row["data"]),
+            id=row.key,
+            source=row.extra["source"],
+            url=row.extra["url"],
+            name=row.extra["name"],
+            ingested_at=row.extra["ingested_at"],
+            recipe=row.value,
         )

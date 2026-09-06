@@ -6,6 +6,7 @@ store/tests/fake_asyncpg.py and test_recipe_store.py for why: no local
 Postgres is reachable in this environment).
 """
 import unittest
+from unittest import mock
 from unittest.mock import AsyncMock, patch
 
 from models.output_data_models.annotation_model_features import (
@@ -20,6 +21,7 @@ from store.recipe_annotation_store import (
     RecipeAnnotationStore,
     annotation_from_dict,
     annotation_to_dict,
+    build_recipe_annotation_backing_store,
 )
 from store.tests.fake_asyncpg import FakeAsyncpgPool
 
@@ -66,7 +68,14 @@ class FakePostgresRecipeAnnotationStoreTest(unittest.IsolatedAsyncioTestCase):
         )
         self._patcher.start()
         self.addCleanup(self._patcher.stop)
-        self.store = RecipeAnnotationStore(connection_string="postgresql://fake/db")
+
+        self._env_patcher = mock.patch.dict(
+            "os.environ", {"RECIPE_ENGINE_DATABASE_URL": "postgresql://fake/db"}
+        )
+        self._env_patcher.start()
+        self.addCleanup(self._env_patcher.stop)
+
+        self.store = RecipeAnnotationStore(recipe_annotation_backing_store=build_recipe_annotation_backing_store())
 
     async def test_store_then_get_round_trips(self):
         annotation = _sample_annotation()
@@ -86,9 +95,10 @@ class FakePostgresRecipeAnnotationStoreTest(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(await self.store.get_by_sort_key("Nonexistent"))
 
     async def test_missing_connection_string_raises_a_clear_error(self):
-        store = RecipeAnnotationStore(connection_string=None)
-        with self.assertRaises(RuntimeError):
-            await store.get("anything")
+        with mock.patch.dict("os.environ", {}, clear=True):
+            store = RecipeAnnotationStore(recipe_annotation_backing_store=build_recipe_annotation_backing_store())
+            with self.assertRaises(RuntimeError):
+                await store.get("anything")
 
 
 if __name__ == "__main__":

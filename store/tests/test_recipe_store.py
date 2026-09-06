@@ -15,8 +15,10 @@ below additionally runs a real integration test against it.
 import socket
 import unittest
 from datetime import datetime, timezone
+from unittest import mock
 from unittest.mock import AsyncMock, patch
 
+from async_store.indexed_postgres_store import IndexedColumn, IndexedPostgresStore
 from models.output_data_models.annotation_model_features import (
     Recipe,
     RecipeIngredient,
@@ -24,6 +26,7 @@ from models.output_data_models.annotation_model_features import (
 )
 from store.recipe_store import (
     RecipeStore,
+    build_recipe_backing_store,
     recipe_from_dict,
     recipe_id_for_url,
     recipe_to_dict,
@@ -129,7 +132,16 @@ class FakePostgresRecipeStoreTest(unittest.IsolatedAsyncioTestCase):
         )
         self._patcher.start()
         self.addCleanup(self._patcher.stop)
-        self.store = RecipeStore(connection_string="postgresql://fake/db")
+
+        self._env_patcher = mock.patch.dict(
+            "os.environ", {"RECIPE_ENGINE_DATABASE_URL": "postgresql://fake/db"}
+        )
+        self._env_patcher.start()
+        self.addCleanup(self._env_patcher.stop)
+
+        # Uses the real production provider function, not a hand-rolled
+        # backing store, so a regression there would show up here too.
+        self.store = RecipeStore(recipe_backing_store=build_recipe_backing_store())
 
     async def test_save_then_get_round_trips_a_real_recipe(self):
         recipe = _sample_recipe()
@@ -212,9 +224,10 @@ class FakePostgresRecipeStoreTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(page), 2)
 
     async def test_missing_connection_string_raises_a_clear_error(self):
-        store = RecipeStore(connection_string=None)
-        with self.assertRaises(RuntimeError):
-            await store.get_recipe("anything")
+        with mock.patch.dict("os.environ", {}, clear=True):
+            store = RecipeStore(recipe_backing_store=build_recipe_backing_store())
+            with self.assertRaises(RuntimeError):
+                await store.get_recipe("anything")
 
 
 @unittest.skipUnless(_postgres_reachable(), "no local Postgres reachable on 127.0.0.1:5432")
@@ -228,17 +241,32 @@ class LivePostgresRecipeStoreTest(unittest.IsolatedAsyncioTestCase):
             "RECIPE_ENGINE_TEST_DATABASE_URL",
             "postgresql://postgres@127.0.0.1:5432/postgres",
         )
-        self.store = RecipeStore(connection_string=connection_string, table_name="recipes_test_fixture")
-        pool = await self.store._ensure_connection()
+        # Same shape as build_recipe_backing_store(), but pointed at an
+        # isolated fixture table rather than the real "recipes" table.
+        self.backing_store = IndexedPostgresStore(
+            connection_string=connection_string,
+            table_name="recipes_test_fixture",
+            key_column="id",
+            extra_columns=(
+                IndexedColumn("source"),
+                IndexedColumn("url", unique=True),
+                IndexedColumn("name"),
+                IndexedColumn("ingested_at", sql_type="TIMESTAMPTZ"),
+            ),
+            serialize=recipe_to_dict,
+            deserialize=recipe_from_dict,
+        )
+        self.store = RecipeStore(recipe_backing_store=self.backing_store)
+        pool = await self.backing_store._ensure_connection()
         async with pool.acquire() as conn:
-            await conn.execute(f"DROP TABLE IF EXISTS {self.store.table_name}")
-        await self.store._create_table_if_not_exists()
+            await conn.execute(f"DROP TABLE IF EXISTS {self.backing_store.table_name}")
+        await self.backing_store._create_table_if_not_exists()
 
     async def asyncTearDown(self):
-        pool = await self.store._ensure_connection()
+        pool = await self.backing_store._ensure_connection()
         async with pool.acquire() as conn:
-            await conn.execute(f"DROP TABLE IF EXISTS {self.store.table_name}")
-        await self.store.close()
+            await conn.execute(f"DROP TABLE IF EXISTS {self.backing_store.table_name}")
+        await self.backing_store.close()
 
     async def test_save_and_get_round_trip_against_real_postgres(self):
         recipe = _sample_recipe()

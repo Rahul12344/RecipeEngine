@@ -3,24 +3,19 @@ Shared plumbing for a Postgres-backed store of values of type T, identified
 by a string key, with a handful of extra, independently-queryable columns
 alongside a JSONB blob holding the value's full serialized structure.
 
-Factors out what every concrete store in this codebase (RecipeStore,
-RecipeAnnotationStore, UserIngredientInventoryStore) otherwise reimplements
-on its own: reading the shared Postgres connection string from the
-environment (raising a clear error if it's missing, rather than a confusing
-asyncpg failure later), creating the table (+ indexes on the extra columns)
-on first use, and running queries.
-
-Concrete subclasses never see a connection pool, `asyncpg`, or
-`_ensure_connection` at all -- not even for their own bespoke queries beyond
-the generic upsert/get-by-column helpers here. They declare `extra_columns`,
-implement `_serialize_value`/`_deserialize_value` (from AsyncPostgresStore)
-for their own dataclass <-> JSON shape, and issue any additional queries
-through `_execute`/`_fetchrow`/`_fetch`, passing SQL text and args only.
+This is meant to be used directly (via composition), not subclassed: a
+@provides-registered *function* builds a fully-configured instance (table
+name, extra columns, serialize/deserialize) for a given entity type, and a
+plain, backend-agnostic domain class (e.g. RecipeStore) is injected with
+that instance and calls only its generic, non-SQL methods
+(get/set/upsert/get_by_column/get_row/list_rows) -- no SQL, table names, or
+JSONB casting ever appear in a domain class.
 """
 from __future__ import annotations
 
+import json
 import os
-from typing import Any, Generic, NamedTuple, Optional, Sequence, TypeVar
+from typing import Any, Callable, Dict, Generic, List, NamedTuple, Optional, Sequence, TypeVar
 
 from async_store.async_postgres_store import AsyncPostgresStore
 
@@ -39,16 +34,23 @@ class IndexedColumn(NamedTuple):
     unique: bool = False
 
 
+class Row(NamedTuple):
+    """One stored record: its key, its extra column values by name, and its deserialized value."""
+
+    key: str
+    extra: Dict[str, Any]
+    value: Any
+
+
 class IndexedPostgresStore(AsyncPostgresStore[str, T], Generic[T]):
     """
-    Base class for a Postgres table shaped like:
+    A Postgres table shaped like:
         <key_column> TEXT PRIMARY KEY, <extra_columns...>, <value_column> JSONB NOT NULL
 
-    Subclasses set the `extra_columns` class attribute (empty by default) to
-    declare any extra indexable columns beyond the key and JSONB value.
+    `serialize`/`deserialize` convert a value of type T to/from a JSON-able
+    dict; if omitted, values are assumed to already be JSON-able as-is
+    (matching AsyncPostgresStore's own default behavior).
     """
-
-    extra_columns: Sequence[IndexedColumn] = ()
 
     def __init__(
         self,
@@ -56,12 +58,10 @@ class IndexedPostgresStore(AsyncPostgresStore[str, T], Generic[T]):
         table_name: str = "store",
         key_column: str = "id",
         value_column: str = "data",
+        extra_columns: Sequence[IndexedColumn] = (),
+        serialize: Optional[Callable[[T], Any]] = None,
+        deserialize: Optional[Callable[[Any], T]] = None,
     ):
-        # `connection_string` defaults to None (rather than being required)
-        # so subclasses stay zero-arg constructible for the DI container;
-        # the real value is resolved from the environment here, or raised
-        # as a clear error in `_ensure_connection` the first time a
-        # connection is actually needed.
         super().__init__(
             connection_string=connection_string or os.environ.get(DATABASE_URL_ENV_VAR),
             table_name=table_name,
@@ -69,11 +69,21 @@ class IndexedPostgresStore(AsyncPostgresStore[str, T], Generic[T]):
             value_column=value_column,
             create_table=True,
         )
+        self.extra_columns = extra_columns
+        self._serialize = serialize
+        self._deserialize = deserialize
+
+    def _serialize_value(self, value: T) -> str:
+        return json.dumps(self._serialize(value) if self._serialize else value)
+
+    def _deserialize_value(self, json_str) -> T:
+        data = json.loads(json_str) if isinstance(json_str, str) else json_str
+        return self._deserialize(data) if self._deserialize else data
 
     async def _ensure_connection(self):
         if not self.connection_string:
             raise RuntimeError(
-                f"No Postgres connection string configured for {type(self).__name__}. "
+                f"No Postgres connection string configured for the '{self.table_name}' store. "
                 f"Set the {DATABASE_URL_ENV_VAR} environment variable or pass "
                 f"connection_string explicitly."
             )
@@ -96,24 +106,25 @@ class IndexedPostgresStore(AsyncPostgresStore[str, T], Generic[T]):
                 """)
 
     async def _execute(self, query: str, *args: Any) -> str:
-        """Run a statement that doesn't return rows (INSERT/UPDATE/DELETE)."""
         pool = await self._ensure_connection()
         async with pool.acquire() as conn:
             return await conn.execute(query, *args)
 
     async def _fetchrow(self, query: str, *args: Any):
-        """Run a query and return its first row, or None."""
         pool = await self._ensure_connection()
         async with pool.acquire() as conn:
             return await conn.fetchrow(query, *args)
 
     async def _fetch(self, query: str, *args: Any):
-        """Run a query and return all matching rows."""
         pool = await self._ensure_connection()
         async with pool.acquire() as conn:
             return await conn.fetch(query, *args)
 
-    async def _upsert(self, key: str, value: T, **extra_values: Any) -> None:
+    def _row_to_generic(self, row) -> Row:
+        extra = {col.name: row[col.name] for col in self.extra_columns}
+        return Row(key=row[self.key_column], extra=extra, value=self._deserialize_value(row[self.value_column]))
+
+    async def upsert(self, key: str, value: T, **extra_values: Any) -> None:
         """
         Insert a row (key + extra_columns' values + serialized value), or
         update all of those columns if `key` already exists.
@@ -137,10 +148,59 @@ class IndexedPostgresStore(AsyncPostgresStore[str, T], Generic[T]):
             *values,
         )
 
-    async def _get_by_column(self, column: str, value: Any) -> Optional[T]:
+    async def get_by_column(self, column: str, value: Any) -> Optional[T]:
         """Fetch and deserialize the first row where `column` equals `value`."""
         row = await self._fetchrow(
             f"SELECT {self.value_column} FROM {self.table_name} WHERE {column} = $1 LIMIT 1",
             value,
         )
         return self._deserialize_value(row[self.value_column]) if row is not None else None
+
+    async def get_row(self, key: str) -> Optional[Row]:
+        """Fetch a row (extra column values + deserialized value) by its key."""
+        columns = self._all_column_names()
+        row = await self._fetchrow(
+            f"SELECT {', '.join(columns)} FROM {self.table_name} WHERE {self.key_column} = $1",
+            key,
+        )
+        return self._row_to_generic(row) if row is not None else None
+
+    async def get_row_by_column(self, column: str, value: Any) -> Optional[Row]:
+        """Fetch a row (extra column values + deserialized value) by any one column's value."""
+        columns = self._all_column_names()
+        row = await self._fetchrow(
+            f"SELECT {', '.join(columns)} FROM {self.table_name} WHERE {column} = $1 LIMIT 1",
+            value,
+        )
+        return self._row_to_generic(row) if row is not None else None
+
+    async def list_rows(
+        self,
+        filters: Optional[Dict[str, Any]] = None,
+        order_by: Optional[str] = None,
+        descending: bool = False,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> List[Row]:
+        """List rows, optionally filtered by exact-match extra-column values and ordered."""
+        columns = self._all_column_names()
+        query = f"SELECT {', '.join(columns)} FROM {self.table_name}"
+        params: list = []
+
+        for column, value in (filters or {}).items():
+            params.append(value)
+            query += (" WHERE " if len(params) == 1 else " AND ") + f"{column} = ${len(params)}"
+
+        if order_by:
+            query += f" ORDER BY {order_by} {'DESC' if descending else 'ASC'}"
+
+        params.append(limit)
+        query += f" LIMIT ${len(params)}"
+        params.append(offset)
+        query += f" OFFSET ${len(params)}"
+
+        rows = await self._fetch(query, *params)
+        return [self._row_to_generic(row) for row in rows]
+
+    def _all_column_names(self) -> List[str]:
+        return [self.key_column, *(col.name for col in self.extra_columns), self.value_column]

@@ -37,6 +37,7 @@ import sys
 # without requiring the repo root to already be on PYTHONPATH.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from di import container  # noqa: E402
 from data_pipeline.ingester import Ingester  # noqa: E402
 from data_pipeline.meta_info.allrecipes_source_metadata import AllRecipesSourceMetadata  # noqa: E402
 from data_pipeline.meta_info.delish_source_metadata import DelishSourceMetadata  # noqa: E402
@@ -62,7 +63,7 @@ async def _run() -> None:
             f"e.g. postgresql://user:password@localhost:5432/recipe_engine)."
         )
 
-    recipe_store = RecipeStore(connection_string=database_url)
+    recipe_store = container().get(RecipeStore)
     retriever = BaseRetriever()
     supported_sources = [
         AllRecipesSourceMetadata(),
