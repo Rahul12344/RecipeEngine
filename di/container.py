@@ -11,6 +11,15 @@ into receiving a dependency by naming an __init__ parameter after that
 dependency's registered name; pinject resolves it from there (regardless of
 whether it came from a class or function provider) and reuses the same
 instance everywhere.
+
+A function provider's own parameters are injectable too, exactly like a
+class's __init__ params: the wrapper built below keeps `fn`'s real
+parameter names (rather than swallowing them into *args/**kwargs) so
+pinject's introspection -- the same mechanism it uses for classes -- finds
+and injects them by name. This is what lets e.g. a `database_url` provider
+be injected straight into another provider function that builds something
+using it, instead of that function having to call the `database_url`
+provider directly.
 """
 import inspect
 import types
@@ -23,13 +32,23 @@ from di.provides import get_providers
 T = TypeVar("T")
 
 
-def _make_provider_method(name: str, fn: Callable[[], object]):
+def _make_provider_method(name: str, fn: Callable[..., object]):
     """Build a pinject provider method (to be bound to a BindingSpec instance)
-    for a function-based provider registered under `name`."""
-    @pinject.provides(arg_name=name, in_scope=pinject.SINGLETON)
-    def provider_method(self):
-        return fn()
-    return provider_method
+    for a function-based provider registered under `name`, preserving `fn`'s
+    own parameter names so pinject can inject matching registered providers
+    into it."""
+    param_names = list(inspect.signature(fn).parameters)
+    params_str = ", ".join(param_names)
+    args_str = ", ".join(param_names)
+    namespace = {"_fn": fn}
+    if params_str:
+        source = f"def provider_method(self, {params_str}):\n    return _fn({args_str})\n"
+    else:
+        source = "def provider_method(self):\n    return _fn()\n"
+    exec(source, namespace)
+    raw_method = namespace["provider_method"]
+    raw_method.__name__ = f"provide_{name}"
+    return pinject.provides(arg_name=name, in_scope=pinject.SINGLETON)(raw_method)
 
 
 class _ProvidesBindingSpec(pinject.BindingSpec):
