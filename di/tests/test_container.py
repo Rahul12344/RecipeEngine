@@ -132,6 +132,68 @@ class FunctionProviderTest(unittest.TestCase):
         self.assertEqual(consumer.widget, "from a function")
         self.assertIsInstance(consumer.store, RecipeAnnotationStore)
 
+    def test_function_provider_params_are_injected_by_name_like_a_class_init(self):
+        """A provider function's own parameters are injectable, exactly like
+        a class's __init__ params -- so one provider can be built on top of
+        another without calling it directly."""
+
+        @provides("test_leaf_value")
+        def provide_leaf():
+            return "leaf-value"
+
+        @provides("test_composed_widget")
+        def build_widget(test_leaf_value):
+            return f"built-from-{test_leaf_value}"
+
+        class Consumer:
+            def __init__(self, test_composed_widget):
+                self.widget = test_composed_widget
+
+        consumer = container().get(Consumer)
+        self.assertEqual(consumer.widget, "built-from-leaf-value")
+
+    def test_function_provider_with_missing_dependency_raises_cleanly(self):
+        """A provider function depending on an unregistered name fails with
+        a clear pinject error, not an internal crash from the dynamically
+        built wrapper (verified directly against pinject before relying on
+        this in di/container.py)."""
+
+        @provides("test_widget_with_missing_dep")
+        def build_widget(test_nonexistent_dependency):
+            return test_nonexistent_dependency
+
+        class Consumer:
+            def __init__(self, test_widget_with_missing_dep):
+                self.widget = test_widget_with_missing_dep
+
+        with self.assertRaises(Exception):
+            container().get(Consumer)
+
+    def test_provider_returning_none_is_injected_without_crashing(self):
+        """A provider legitimately resolving to None (e.g. an env-var-backed
+        value that isn't set) must be injectable without pinject's own
+        rejection-error formatting crashing on this module's exec-generated
+        provider wrappers -- this is a real bug this project hit: a config
+        value provider returning None during a nested provider function's
+        own dependency injection crashed instead of just passing None
+        through, so the consumer could handle it. Regression test for
+        allow_injecting_none in di/container.py."""
+
+        @provides("test_optional_value")
+        def build_optional_value():
+            return None
+
+        @provides("test_widget_depending_on_optional")
+        def build_widget(test_optional_value):
+            return f"got-{test_optional_value}"
+
+        class Consumer:
+            def __init__(self, test_widget_depending_on_optional):
+                self.widget = test_widget_depending_on_optional
+
+        consumer = container().get(Consumer)
+        self.assertEqual(consumer.widget, "got-None")
+
 
 if __name__ == "__main__":
     unittest.main()

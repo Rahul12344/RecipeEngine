@@ -13,9 +13,11 @@ section of the repo README for how to wire that up.
 Usage:
     python scripts/run_ingestion.py
 
-Required environment variable:
+Required configuration:
     RECIPE_ENGINE_DATABASE_URL - Postgres connection string, e.g.
         postgresql://user:password@localhost:5432/recipe_engine
+    Set it as a real environment variable, or in a .env file at the repo
+    root (see config/env.py) -- a real env var always takes precedence.
 
 AWS credentials for the S3 archive step are picked up from the standard
 boto3 credential chain (env vars / ~/.aws/credentials / instance role).
@@ -45,7 +47,6 @@ from data_pipeline.meta_info.food_dot_com_source_metadata import FoodDotComSourc
 from data_pipeline.meta_info.food_network_source_metadata import FoodNetworkSourceMetadata  # noqa: E402
 from data_pipeline.retriever.recipe_source_retrievers import BaseRetriever  # noqa: E402
 from data_pipeline.transformers.transformer_registry import default_transformers  # noqa: E402
-from async_store.indexed_postgres_store import DATABASE_URL_ENV_VAR  # noqa: E402
 from store.postgres.recipe_backing_store import build_recipe_backing_store  # noqa: E402,F401 (registers 'recipe_backing_store' with DI)
 from store.recipe_store import RecipeStore  # noqa: E402
 
@@ -57,13 +58,9 @@ logger = logging.getLogger(__name__)
 
 
 async def _run() -> None:
-    database_url = os.environ.get(DATABASE_URL_ENV_VAR)
-    if not database_url:
-        raise RuntimeError(
-            f"{DATABASE_URL_ENV_VAR} is not set (a Postgres connection string, "
-            f"e.g. postgresql://user:password@localhost:5432/recipe_engine)."
-        )
-
+    # No manual "is it configured" check here: RecipeStore's first real
+    # Postgres operation raises a clear RuntimeError on its own if
+    # RECIPE_ENGINE_DATABASE_URL isn't set (see IndexedPostgresStore).
     recipe_store = container().get(RecipeStore)
     retriever = BaseRetriever()
     supported_sources = [

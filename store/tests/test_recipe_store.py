@@ -19,13 +19,14 @@ from unittest import mock
 from unittest.mock import AsyncMock, patch
 
 from async_store.indexed_postgres_store import IndexedColumn, IndexedPostgresStore
+from di import container, reset_container
 from models.output_data_models.annotation_model_features import (
     Recipe,
     RecipeIngredient,
     RecipeInstruction,
 )
 from models.output_data_models.stored_recipe import StoredRecipe
-from store.postgres.recipe_backing_store import build_recipe_backing_store
+from store.postgres.recipe_backing_store import build_recipe_backing_store  # noqa: F401 (registers with DI)
 from store.recipe_store import RecipeStore, recipe_id_for_url
 from store.tests.fake_asyncpg import FakeAsyncpgPool
 
@@ -135,9 +136,12 @@ class FakePostgresRecipeStoreTest(unittest.IsolatedAsyncioTestCase):
         self._env_patcher.start()
         self.addCleanup(self._env_patcher.stop)
 
-        # Uses the real production provider function, not a hand-rolled
-        # backing store, so a regression there would show up here too.
-        self.store = RecipeStore(recipe_backing_store=build_recipe_backing_store())
+        # Resolved through the real DI container end to end (RecipeStore <-
+        # recipe_backing_store <- database_url), not hand-assembled, so a
+        # regression anywhere in that chain would show up here too.
+        reset_container()
+        self.addCleanup(reset_container)
+        self.store = container().get(RecipeStore)
 
     async def test_save_then_get_round_trips_a_real_recipe(self):
         recipe = _sample_recipe()
@@ -221,7 +225,8 @@ class FakePostgresRecipeStoreTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_missing_connection_string_raises_a_clear_error(self):
         with mock.patch.dict("os.environ", {}, clear=True):
-            store = RecipeStore(recipe_backing_store=build_recipe_backing_store())
+            reset_container()
+            store = container().get(RecipeStore)
             with self.assertRaises(RuntimeError):
                 await store.get_recipe("anything")
 

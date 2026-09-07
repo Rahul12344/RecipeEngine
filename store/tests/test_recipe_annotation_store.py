@@ -9,6 +9,7 @@ import unittest
 from unittest import mock
 from unittest.mock import AsyncMock, patch
 
+from di import container, reset_container
 from models.output_data_models.annotation_model_features import (
     Diet,
     DietTag,
@@ -17,7 +18,7 @@ from models.output_data_models.annotation_model_features import (
     RecipeAnnotation,
     RecipeMetadata,
 )
-from store.postgres.recipe_annotation_backing_store import build_recipe_annotation_backing_store
+from store.postgres.recipe_annotation_backing_store import build_recipe_annotation_backing_store  # noqa: F401 (registers with DI)
 from store.recipe_annotation_store import RecipeAnnotationStore
 from store.tests.fake_asyncpg import FakeAsyncpgPool
 
@@ -71,7 +72,13 @@ class FakePostgresRecipeAnnotationStoreTest(unittest.IsolatedAsyncioTestCase):
         self._env_patcher.start()
         self.addCleanup(self._env_patcher.stop)
 
-        self.store = RecipeAnnotationStore(recipe_annotation_backing_store=build_recipe_annotation_backing_store())
+        # Resolved through the real DI container end to end, not
+        # hand-assembled, so a regression anywhere in that chain
+        # (RecipeAnnotationStore <- recipe_annotation_backing_store <-
+        # database_url) would show up here too.
+        reset_container()
+        self.addCleanup(reset_container)
+        self.store = container().get(RecipeAnnotationStore)
 
     async def test_store_then_get_round_trips(self):
         annotation = _sample_annotation()
@@ -92,7 +99,8 @@ class FakePostgresRecipeAnnotationStoreTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_missing_connection_string_raises_a_clear_error(self):
         with mock.patch.dict("os.environ", {}, clear=True):
-            store = RecipeAnnotationStore(recipe_annotation_backing_store=build_recipe_annotation_backing_store())
+            reset_container()
+            store = container().get(RecipeAnnotationStore)
             with self.assertRaises(RuntimeError):
                 await store.get("anything")
 

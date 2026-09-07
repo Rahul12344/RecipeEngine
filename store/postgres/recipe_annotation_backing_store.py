@@ -8,17 +8,23 @@ annotated recipe's name), and the RecipeAnnotation <-> JSON mapping
 (delegated to RecipeAnnotation.to_dict/from_dict) all live here, kept
 separate from RecipeAnnotationStore itself, which has no Postgres-specific
 code at all.
+
+`database_url` is itself a DI-injected parameter (see config/database.py's
+provide_database_url), not called directly -- provider function parameters
+are injected by name exactly like a class's __init__ params.
 """
 from __future__ import annotations
 
 from async_store.indexed_postgres_store import IndexedColumn, IndexedPostgresStore
+from config.database import provide_database_url  # noqa: F401 (registers 'database_url' with DI)
 from di import provides
 from models.output_data_models.annotation_model_features import RecipeAnnotation
 
 
 @provides("recipe_annotation_backing_store")
-def build_recipe_annotation_backing_store() -> IndexedPostgresStore[RecipeAnnotation]:
+def build_recipe_annotation_backing_store(database_url) -> IndexedPostgresStore[RecipeAnnotation]:
     return IndexedPostgresStore(
+        connection_string=database_url,
         table_name="recipe_annotations",
         key_column="recipe_id",
         extra_columns=(
