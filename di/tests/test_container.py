@@ -168,6 +168,31 @@ class FunctionProviderTest(unittest.TestCase):
         with self.assertRaises(Exception):
             container().get(Consumer)
 
+    def test_provider_returning_none_is_injected_without_crashing(self):
+        """A provider legitimately resolving to None (e.g. an env-var-backed
+        value that isn't set) must be injectable without pinject's own
+        rejection-error formatting crashing on this module's exec-generated
+        provider wrappers -- this is a real bug this project hit: a config
+        value provider returning None during a nested provider function's
+        own dependency injection crashed instead of just passing None
+        through, so the consumer could handle it. Regression test for
+        allow_injecting_none in di/container.py."""
+
+        @provides("test_optional_value")
+        def build_optional_value():
+            return None
+
+        @provides("test_widget_depending_on_optional")
+        def build_widget(test_optional_value):
+            return f"got-{test_optional_value}"
+
+        class Consumer:
+            def __init__(self, test_widget_depending_on_optional):
+                self.widget = test_widget_depending_on_optional
+
+        consumer = container().get(Consumer)
+        self.assertEqual(consumer.widget, "got-None")
+
 
 if __name__ == "__main__":
     unittest.main()

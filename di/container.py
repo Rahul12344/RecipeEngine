@@ -75,11 +75,23 @@ class Container:
     def __init__(self):
         providers = get_providers()
         binding_specs = [_ProvidesBindingSpec(providers)] if providers else []
-        # modules=None disables pinject's default behavior of scanning every
-        # currently-imported module for implicit bindings; we only want the
-        # explicit @provides bindings above, and the scan is also fragile
-        # (it can crash importing unrelated stdlib modules, e.g. dbm.gnu).
-        self._obj_graph = pinject.new_object_graph(binding_specs=binding_specs, modules=None)
+        self._obj_graph = pinject.new_object_graph(
+            binding_specs=binding_specs,
+            # modules=None disables pinject's default behavior of scanning
+            # every currently-imported module for implicit bindings; we only
+            # want the explicit @provides bindings above, and the scan is
+            # also fragile (it can crash importing unrelated stdlib
+            # modules, e.g. dbm.gnu).
+            modules=None,
+            # A provider is allowed to legitimately resolve to None (e.g. an
+            # env-var-backed config value that isn't set) -- the consumer
+            # decides what to do about that later, rather than pinject
+            # rejecting it at graph-resolution time. Without this, pinject's
+            # own rejection-error formatting crashes on this module's
+            # exec-generated provider wrappers (they lack real __module__
+            # info, which pinject's error description code assumes).
+            allow_injecting_none=True,
+        )
 
     def get(self, cls: Type[T]) -> T:
         """Instantiate `cls`, injecting any @provides dependencies it declares by name."""
