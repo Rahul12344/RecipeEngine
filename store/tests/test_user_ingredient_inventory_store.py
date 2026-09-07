@@ -12,6 +12,7 @@ import unittest
 from unittest import mock
 from unittest.mock import AsyncMock
 
+from async_store.in_memory_kv_store import InMemoryKVStore
 from di import container, reset_container
 from models.features.user_ingredient_inventory import InventoryItem, UserIngredientInventory
 from store.postgres.user_ingredient_inventory_backing_store import build_user_ingredient_inventory_backing_store  # noqa: F401 (registers with DI)
@@ -95,6 +96,42 @@ class UserIngredientInventoryStoreRoundTripTest(unittest.IsolatedAsyncioTestCase
         await self.store.get_inventory("a")
         await self.store.get_inventory("b")
         self.assertEqual(self._mock_create_pool.call_count, 1)
+
+
+class UserIngredientInventoryStoreWithInMemoryBackingStoreTest(unittest.IsolatedAsyncioTestCase):
+    """UserIngredientInventoryStore depends on the AsyncKVStore interface, not
+    IndexedPostgresStore specifically -- proves the backing store is a real,
+    swappable dependency by running the same scenarios as the Postgres-backed
+    tests above against a plain InMemoryKVStore instead, no DI/Postgres/fakes
+    involved at all."""
+
+    async def asyncSetUp(self):
+        self.store = UserIngredientInventoryStore(user_ingredient_inventory_backing_store=InMemoryKVStore())
+
+    async def test_missing_user_returns_empty_inventory(self):
+        inventory = await self.store.get_inventory("nobody")
+        self.assertEqual(inventory, UserIngredientInventory(user_id="nobody", items=[]))
+
+    async def test_set_then_get_round_trips(self):
+        inventory = UserIngredientInventory(
+            user_id="u1",
+            items=[InventoryItem(name="egg", quantity=6, unit="count")],
+        )
+        await self.store.set_inventory(inventory)
+        self.assertEqual(await self.store.get_inventory("u1"), inventory)
+
+    async def test_add_and_remove_item(self):
+        await self.store.add_item("u1", InventoryItem(name="egg", quantity=6, unit="count"))
+        await self.store.add_item("u1", InventoryItem(name="milk", quantity=1, unit="l"))
+        updated = await self.store.remove_item("u1", "egg")
+        self.assertEqual([item.name for item in updated.items], ["milk"])
+
+    async def test_inventories_for_different_users_are_isolated(self):
+        await self.store.add_item("u1", InventoryItem(name="egg", quantity=6, unit="count"))
+        await self.store.add_item("u2", InventoryItem(name="milk", quantity=1, unit="l"))
+
+        self.assertEqual([item.name for item in (await self.store.get_inventory("u1")).items], ["egg"])
+        self.assertEqual([item.name for item in (await self.store.get_inventory("u2")).items], ["milk"])
 
 
 class UserIngredientInventoryStoreConfigTest(unittest.IsolatedAsyncioTestCase):

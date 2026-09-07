@@ -2,13 +2,16 @@
 DI provider for the Postgres-backed store behind
 store.user_ingredient_inventory_store.UserIngredientInventoryStore.
 
-Builds a fully-configured IndexedPostgresStore for the
+Builds a fully-configured IndexedPostgresStore (a genuine AsyncKVStore
+implementation, see async_store/indexed_postgres_store.py) for the
 `user_ingredient_inventory` table: each user's inventory is a JSONB list of
 ingredient-item dicts, keyed by user_id, no extra indexed columns needed.
-Both sides deal in UserIngredientInventory directly (upsert/get), so this
+Both sides deal in UserIngredientInventory directly (get/set), so this
 provider owns the UserIngredientInventory <-> row mapping too, kept
 separate from UserIngredientInventoryStore itself, which has no
-Postgres-specific code at all.
+Postgres-specific code at all -- it depends on the AsyncKVStore interface,
+so this Postgres-backed provider could be swapped for an InMemoryKVStore-
+backed one (see async_store/in_memory_kv_store.py) with no changes there.
 
 `database_url` is itself a DI-injected parameter (see config/database.py's
 provide_database_url), not called directly -- provider function parameters
