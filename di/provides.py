@@ -1,22 +1,26 @@
 """
 Registry of singleton dependency providers.
 
-Decorate a class OR a zero-arg function with @provides("some_name") to
-register it as the singleton provider for that name. Any other class whose
-__init__ takes a parameter literally named "some_name" will have that
-singleton injected automatically by the container (see di.container).
+Decorate a class OR a function with @provides("some_name") to register it
+as the singleton provider for that name. Any other class whose __init__ (or
+any other provider function's own parameters) takes a parameter literally
+named "some_name" will have that singleton injected automatically by the
+container (see di.container) -- this applies recursively, so a provider
+function can itself take injectable parameters resolved from other
+providers, the same way a class's __init__ does.
 
-Use a class provider (instantiated as `cls()`) when the type itself is the
-thing you want a singleton of. Use a function provider (called as `fn()`)
-when building the singleton needs logic that doesn't belong in a class's own
-zero-arg __init__ -- e.g. constructing a generically-configured instance of
-a shared, reusable class (table name, serializer, etc.) without needing a
-dedicated subclass just to carry that configuration.
+Use a class provider (instantiated as `cls()`, with its own __init__
+params injected) when the type itself is the thing you want a singleton of.
+Use a function provider when building the singleton needs logic that
+doesn't belong in a class's own __init__ -- e.g. constructing a
+generically-configured instance of a shared, reusable class (table name,
+serializer, etc.) without needing a dedicated subclass just to carry that
+configuration.
 """
 import inspect
 from typing import Callable, Dict, Type, Union
 
-Provider = Union[Type, Callable[[], object]]
+Provider = Union[Type, Callable[..., object]]
 
 _PROVIDERS: Dict[str, Provider] = {}
 
