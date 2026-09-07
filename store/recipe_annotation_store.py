@@ -6,7 +6,7 @@ This class has no Postgres-specific code at all: it's injected (via DI, see
 store/postgres/recipe_annotation_backing_store.py) with a generic,
 already-configured backing store and only translates between
 RecipeAnnotation-shaped method calls (store/get/get_by_sort_key) and that
-backing store's generic (upsert/get/get_by_column) API -- both sides deal in
+backing store's generic (set/get/get_by_column) API -- both sides deal in
 RecipeAnnotation directly.
 
 Note: RecipeAnnotation's own NER annotation models are still unimplemented
@@ -37,7 +37,7 @@ class RecipeAnnotationStore:
         self._backing_store = recipe_annotation_backing_store
 
     async def store(self, recipe_id: str, annotation: RecipeAnnotation) -> None:
-        await self._backing_store.upsert(recipe_id, annotation)
+        await self._backing_store.set(recipe_id, annotation)
 
     async def get(self, recipe_id: str) -> Optional[RecipeAnnotation]:
         return await self._backing_store.get(recipe_id)

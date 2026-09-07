@@ -6,7 +6,7 @@ store/postgres/recipe_backing_store.py) with a generic, already-configured
 backing store and just assembles/reads StoredRecipe values (defined in
 models/output_data_models/stored_recipe.py, not here -- so this file and
 store/postgres/recipe_backing_store.py both depend on that shared location
-instead of on each other) through its generic (upsert/get/get_by_column/list)
+instead of on each other) through its generic (set/get/get_by_column/list)
 API -- both sides deal in StoredRecipe directly, no separate "row" shape
 involved.
 
@@ -63,7 +63,7 @@ class RecipeStore:
             ingested_at=datetime.now(timezone.utc),
             recipe=recipe,
         )
-        await self._backing_store.upsert(recipe_id, stored)
+        await self._backing_store.set(recipe_id, stored)
         return recipe_id
 
     async def get_recipe(self, recipe_id: str) -> Optional[StoredRecipe]:

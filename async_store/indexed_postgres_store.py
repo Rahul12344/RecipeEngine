@@ -3,10 +3,13 @@ Shared plumbing for a Postgres-backed store of values of type T, identified
 by a string key, with a handful of extra, independently-queryable columns
 alongside a JSONB blob holding T's serialized structure.
 
-Both reads and writes deal in T directly: `upsert(key, value: T)` and
-`get(key) -> Optional[T]` (no separate "row" shape in the public API). How T
-maps onto the table's columns is entirely a per-implementation concern,
-supplied at construction time:
+Both reads and writes deal in T directly: `set(key, value: T)` (always an
+upsert) and `get(key) -> Optional[T]` (no separate "row" shape in the public
+API) -- the same signatures AsyncKVStore declares, so this is a genuine,
+swappable AsyncKVStore[str, T] implementation (see
+async_store/in_memory_kv_store.py for another). How T maps onto the table's
+columns is entirely a per-implementation concern, supplied at construction
+time:
   - `extra_columns`: IndexedColumn(name, extract, ...) entries -- `extract`
     pulls that column's value off a T instance, for writes.
   - `serialize(value: T)`: the JSON-able blob for the value column.
@@ -55,9 +58,14 @@ class IndexedPostgresStore(AsyncPostgresStore[str, T], Generic[T]):
     A Postgres table shaped like:
         <key_column> TEXT PRIMARY KEY, <extra_columns...>, <value_column> JSONB NOT NULL
 
-    Overrides AsyncPostgresStore's get/set entirely (rather than its
+    A real, fully-conformant AsyncKVStore[str, T] implementation (get/set
+    inherited signatures, delete/close inherited unchanged) -- get/set are
+    overridden entirely here (rather than via AsyncPostgresStore's
     _serialize_value/_deserialize_value hooks) since those assume a single
-    value column; get/set here span every declared column instead.
+    value column; get/set here span every declared column instead. Being a
+    genuine AsyncKVStore means any AsyncKVStore-typed consumer (e.g.
+    UserIngredientInventoryStore) can be handed this, an InMemoryKVStore, or
+    any other implementation interchangeably via DI.
     """
 
     def __init__(
@@ -129,9 +137,9 @@ class IndexedPostgresStore(AsyncPostgresStore[str, T], Generic[T]):
         plain[self.value_column] = json.loads(raw_blob) if isinstance(raw_blob, str) else raw_blob
         return self._deserialize(plain)
 
-    async def upsert(self, key: str, value: T) -> None:
+    async def set(self, key: str, value: T) -> None:
         """Insert `value` under `key` (deriving each extra column's value from it), or
-        update every column if `key` already exists."""
+        update every column if `key` already exists (i.e. always an upsert)."""
         data = json.dumps(self._serialize(value))
         extra_names = [col.name for col in self.extra_columns]
         extra_values = [col.extract(value) for col in self.extra_columns]
