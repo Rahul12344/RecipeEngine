@@ -9,10 +9,15 @@ Both sides deal in UserIngredientInventory directly (upsert/get), so this
 provider owns the UserIngredientInventory <-> row mapping too, kept
 separate from UserIngredientInventoryStore itself, which has no
 Postgres-specific code at all.
+
+`database_url` is itself a DI-injected parameter (see config/database.py's
+provide_database_url), not called directly -- provider function parameters
+are injected by name exactly like a class's __init__ params.
 """
 from __future__ import annotations
 
 from async_store.indexed_postgres_store import IndexedPostgresStore
+from config.database import provide_database_url  # noqa: F401 (registers 'database_url' with DI)
 from di import provides
 from models.features.user_ingredient_inventory import InventoryItem, UserIngredientInventory
 
@@ -29,8 +34,9 @@ def _inventory_from_row(row: dict) -> UserIngredientInventory:
 
 
 @provides("user_ingredient_inventory_backing_store")
-def build_user_ingredient_inventory_backing_store() -> IndexedPostgresStore[UserIngredientInventory]:
+def build_user_ingredient_inventory_backing_store(database_url) -> IndexedPostgresStore[UserIngredientInventory]:
     return IndexedPostgresStore(
+        connection_string=database_url,
         table_name=DEFAULT_TABLE_NAME,
         key_column=DEFAULT_KEY_COLUMN,
         value_column=DEFAULT_VALUE_COLUMN,

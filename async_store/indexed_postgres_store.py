@@ -21,20 +21,19 @@ name, extra columns, serialize/deserialize) for a given entity type, and a
 plain, backend-agnostic domain class (e.g. RecipeStore) is injected with
 that instance and calls only its generic, non-SQL methods -- no SQL, table
 names, or JSONB casting ever appear in a domain class.
+
+This class has no idea where `connection_string` comes from -- that's the
+caller's job (see config/database.py's provide_database_url, which the
+store/postgres/*_backing_store.py provider functions call directly).
 """
 from __future__ import annotations
 
 import json
-import os
 from typing import Any, Callable, Dict, Generic, List, NamedTuple, Optional, Sequence, TypeVar
 
 from async_store.async_postgres_store import AsyncPostgresStore
 
 T = TypeVar("T")
-
-# Every store in this codebase shares one Postgres database (different
-# tables), so this is one shared env var rather than one per store.
-DATABASE_URL_ENV_VAR = "RECIPE_ENGINE_DATABASE_URL"
 
 
 class IndexedColumn(NamedTuple):
@@ -72,7 +71,7 @@ class IndexedPostgresStore(AsyncPostgresStore[str, T], Generic[T]):
         deserialize: Callable[[Dict[str, Any]], T] = _identity,
     ):
         super().__init__(
-            connection_string=connection_string or os.environ.get(DATABASE_URL_ENV_VAR),
+            connection_string=connection_string,
             table_name=table_name,
             key_column=key_column,
             value_column=value_column,
@@ -86,8 +85,7 @@ class IndexedPostgresStore(AsyncPostgresStore[str, T], Generic[T]):
         if not self.connection_string:
             raise RuntimeError(
                 f"No Postgres connection string configured for the '{self.table_name}' store. "
-                f"Set the {DATABASE_URL_ENV_VAR} environment variable or pass "
-                f"connection_string explicitly."
+                f"Pass connection_string explicitly."
             )
         return await super()._ensure_connection()
 

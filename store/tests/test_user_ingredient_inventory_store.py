@@ -12,8 +12,9 @@ import unittest
 from unittest import mock
 from unittest.mock import AsyncMock
 
+from di import container, reset_container
 from models.features.user_ingredient_inventory import InventoryItem, UserIngredientInventory
-from store.postgres.user_ingredient_inventory_backing_store import build_user_ingredient_inventory_backing_store
+from store.postgres.user_ingredient_inventory_backing_store import build_user_ingredient_inventory_backing_store  # noqa: F401 (registers with DI)
 from store.tests.fake_asyncpg import FakeAsyncpgPool
 from store.user_ingredient_inventory_store import UserIngredientInventoryStore
 
@@ -34,11 +35,13 @@ class UserIngredientInventoryStoreRoundTripTest(unittest.IsolatedAsyncioTestCase
         self._env_patcher.start()
         self.addAsyncCleanup(self._env_patcher.stop)
 
-        # Uses the real production provider function, not a hand-rolled
-        # backing store, so a regression there would show up here too.
-        self.store = UserIngredientInventoryStore(
-            user_ingredient_inventory_backing_store=build_user_ingredient_inventory_backing_store()
-        )
+        # Resolved through the real DI container end to end
+        # (UserIngredientInventoryStore <- user_ingredient_inventory_backing_store
+        # <- database_url), not hand-assembled, so a regression anywhere in
+        # that chain would show up here too.
+        reset_container()
+        self.addAsyncCleanup(reset_container)
+        self.store = container().get(UserIngredientInventoryStore)
 
     async def test_missing_user_returns_empty_inventory(self):
         inventory = await self.store.get_inventory("nobody")
@@ -98,18 +101,23 @@ class UserIngredientInventoryStoreConfigTest(unittest.IsolatedAsyncioTestCase):
     """RECIPE_ENGINE_DATABASE_URL is shared with RecipeStore/RecipeAnnotationStore --
     all three stores live in the same Postgres database, just different tables."""
 
-    @mock.patch.dict("os.environ", {}, clear=True)
     async def test_missing_connection_string_raises_a_clear_error(self):
-        store = UserIngredientInventoryStore(
-            user_ingredient_inventory_backing_store=build_user_ingredient_inventory_backing_store()
-        )
-        with self.assertRaisesRegex(RuntimeError, "RECIPE_ENGINE_DATABASE_URL"):
-            await store.get_inventory("anyone")
+        with mock.patch.dict("os.environ", {}, clear=True):
+            reset_container()
+            store = container().get(UserIngredientInventoryStore)
+            with self.assertRaises(RuntimeError):
+                await store.get_inventory("anyone")
+        reset_container()
 
-    @mock.patch.dict("os.environ", {"RECIPE_ENGINE_DATABASE_URL": "postgresql://x/y"})
-    def test_connection_string_is_read_from_the_shared_env_var(self):
-        backing_store = build_user_ingredient_inventory_backing_store()
-        self.assertEqual(backing_store.connection_string, "postgresql://x/y")
+    async def test_database_url_is_injected_from_the_shared_env_var(self):
+        """Confirms the DI wiring end to end: config.database.provide_database_url
+        (tested on its own in config/tests/test_database.py) actually reaches
+        this store's backing store via injection, not a direct call."""
+        with mock.patch.dict("os.environ", {"RECIPE_ENGINE_DATABASE_URL": "postgresql://x/y"}):
+            reset_container()
+            store = container().get(UserIngredientInventoryStore)
+            self.assertEqual(store._backing_store.connection_string, "postgresql://x/y")
+        reset_container()
 
 
 if __name__ == "__main__":
