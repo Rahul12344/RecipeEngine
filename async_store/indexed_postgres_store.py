@@ -3,10 +3,13 @@ Shared plumbing for a Postgres-backed store of values of type T, identified
 by a string key, with a handful of extra, independently-queryable columns
 alongside a JSONB blob holding T's serialized structure.
 
-Both reads and writes deal in T directly: `upsert(key, value: T)` and
-`get(key) -> Optional[T]` (no separate "row" shape in the public API). How T
-maps onto the table's columns is entirely a per-implementation concern,
-supplied at construction time:
+Both reads and writes deal in T directly: `set(key, value: T)` (always an
+upsert) and `get(key) -> Optional[T]` (no separate "row" shape in the public
+API) -- the same signatures AsyncKVStore declares, so this is a genuine,
+swappable AsyncKVStore[str, T] implementation (see
+async_store/in_memory_kv_store.py for another). How T maps onto the table's
+columns is entirely a per-implementation concern, supplied at construction
+time:
   - `extra_columns`: IndexedColumn(name, extract, ...) entries -- `extract`
     pulls that column's value off a T instance, for writes.
   - `serialize(value: T)`: the JSON-able blob for the value column.

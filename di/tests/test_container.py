@@ -5,6 +5,7 @@ from di import container, get_providers, provides, reset_container
 # Importing these triggers their @provides registration.
 from models.neer_model.neer import NEERPredictor
 from models.annotation_model import RecipeAnnotationModel
+from store.postgres.recipe_annotation_backing_store import build_recipe_annotation_backing_store  # noqa: F401
 from store.recipe_annotation_store import RecipeAnnotationStore
 from store.recipe_user_feature_store import RecipeUserFeatureStore
 
