@@ -31,3 +31,16 @@ class UserIngredientInventory:
 
     user_id: str
     items: list[InventoryItem] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class ConsumeIngredientsResult:
+    """Result of deducting a recipe's ingredients from a user's inventory.
+
+    `unresolved_ingredients` lists ingredient names whose unit couldn't be
+    reconciled with the matching inventory item's unit; those items were
+    left untouched in `updated_inventory`.
+    """
+
+    updated_inventory: UserIngredientInventory
+    unresolved_ingredients: list[str]

@@ -15,6 +15,7 @@ from unittest.mock import AsyncMock
 from async_store.in_memory_kv_store import InMemoryKVStore
 from di import container, reset_container
 from models.features.user_ingredient_inventory import InventoryItem, UserIngredientInventory
+from models.output_data_models.annotation_model_features import RecipeIngredient
 from store.postgres.user_ingredient_inventory_backing_store import build_user_ingredient_inventory_backing_store  # noqa: F401 (registers with DI)
 from store.tests.fake_asyncpg import FakeAsyncpgPool
 from store.user_ingredient_inventory_store import UserIngredientInventoryStore
@@ -97,6 +98,51 @@ class UserIngredientInventoryStoreRoundTripTest(unittest.IsolatedAsyncioTestCase
         await self.store.get_inventory("b")
         self.assertEqual(self._mock_create_pool.call_count, 1)
 
+    async def test_restock_item_pays_down_an_existing_deficit(self):
+        await self.store.add_item("u1", InventoryItem(name="egg", quantity=-2, unit="count"))
+        updated = await self.store.restock_item("u1", InventoryItem(name="egg", quantity=12, unit="count"))
+        self.assertEqual(updated.items, [InventoryItem(name="egg", quantity=10, unit="count")])
+
+    async def test_restock_item_creates_new_item_when_absent(self):
+        updated = await self.store.restock_item("u1", InventoryItem(name="flour", quantity=2, unit="cup"))
+        self.assertEqual(updated.items, [InventoryItem(name="flour", quantity=2, unit="cup")])
+
+    async def test_restock_item_falls_back_to_replace_when_units_unreconcilable(self):
+        await self.store.add_item("u1", InventoryItem(name="paprika", quantity=5, unit="g"))
+        # "cup" -> "g" needs a density for paprika, which isn't in the known table.
+        updated = await self.store.restock_item("u1", InventoryItem(name="paprika", quantity=1, unit="cup"))
+        self.assertEqual(updated.items, [InventoryItem(name="paprika", quantity=1, unit="cup")])
+
+    async def test_consume_ingredients_deducts_matching_items(self):
+        await self.store.add_item("u1", InventoryItem(name="egg", quantity=6, unit="count"))
+        result = await self.store.consume_ingredients("u1", [RecipeIngredient(name="egg", quantity=2, unit="count")])
+        self.assertEqual(result.updated_inventory.items, [InventoryItem(name="egg", quantity=4, unit="count")])
+        self.assertEqual(result.unresolved_ingredients, [])
+
+    async def test_consume_ingredients_allows_quantity_to_go_negative(self):
+        await self.store.add_item("u1", InventoryItem(name="egg", quantity=6, unit="count"))
+        result = await self.store.consume_ingredients("u1", [RecipeIngredient(name="egg", quantity=8, unit="count")])
+        self.assertEqual(result.updated_inventory.items, [InventoryItem(name="egg", quantity=-2, unit="count")])
+
+    async def test_consume_ingredients_creates_a_deficit_for_an_unmatched_ingredient(self):
+        result = await self.store.consume_ingredients("u1", [RecipeIngredient(name="sugar", quantity=2, unit="cup")])
+        self.assertEqual(result.updated_inventory.items, [InventoryItem(name="sugar", quantity=-2, unit="cup")])
+
+    async def test_consume_ingredients_reports_unresolved_unit_mismatch_and_leaves_item_untouched(self):
+        await self.store.add_item("u1", InventoryItem(name="paprika", quantity=5, unit="g"))
+        result = await self.store.consume_ingredients(
+            "u1", [RecipeIngredient(name="paprika", quantity=1, unit="cup")]
+        )
+        self.assertEqual(result.unresolved_ingredients, ["paprika"])
+        self.assertEqual(result.updated_inventory.items, [InventoryItem(name="paprika", quantity=5, unit="g")])
+
+    async def test_consume_ingredients_converts_units_before_deducting(self):
+        await self.store.add_item("u1", InventoryItem(name="flour", quantity=1000, unit="g"))
+        result = await self.store.consume_ingredients("u1", [RecipeIngredient(name="flour", quantity=2, unit="cup")])
+        [item] = result.updated_inventory.items
+        self.assertEqual(item.unit, "g")
+        self.assertAlmostEqual(item.quantity, 1000 - (2 * 236.588 * 0.507), places=2)
+
 
 class UserIngredientInventoryStoreWithInMemoryBackingStoreTest(unittest.IsolatedAsyncioTestCase):
     """UserIngredientInventoryStore depends on the AsyncKVStore interface, not
@@ -132,6 +178,17 @@ class UserIngredientInventoryStoreWithInMemoryBackingStoreTest(unittest.Isolated
 
         self.assertEqual([item.name for item in (await self.store.get_inventory("u1")).items], ["egg"])
         self.assertEqual([item.name for item in (await self.store.get_inventory("u2")).items], ["milk"])
+
+    async def test_consume_then_restock_pays_down_the_resulting_deficit(self):
+        await self.store.add_item("u1", InventoryItem(name="egg", quantity=6, unit="count"))
+
+        after_use = await self.store.consume_ingredients(
+            "u1", [RecipeIngredient(name="egg", quantity=8, unit="count")]
+        )
+        self.assertEqual(after_use.updated_inventory.items, [InventoryItem(name="egg", quantity=-2, unit="count")])
+
+        after_restock = await self.store.restock_item("u1", InventoryItem(name="egg", quantity=12, unit="count"))
+        self.assertEqual(after_restock.items, [InventoryItem(name="egg", quantity=10, unit="count")])
 
 
 class UserIngredientInventoryStoreConfigTest(unittest.IsolatedAsyncioTestCase):
